@@ -1,0 +1,9 @@
+# colcon workspace artifacts and vcs-imported sources (never committed)
+src/
+build/
+install/
+log/
+
+# python tooling caches
+__pycache__/
+.ruff_cache/

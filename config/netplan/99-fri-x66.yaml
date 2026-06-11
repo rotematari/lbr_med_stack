@@ -1,0 +1,14 @@
+# /etc/netplan/99-fri-x66.yaml
+# Dedicated NIC for the KUKA LBR Med X66 (KLI) FRI subnet.
+# Host static IP, NO gateway and NO DNS on this link, so default internet routing is untouched.
+# Replace enpXsY with the real interface name from `ip link` (NOT your main/internet NIC).
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    enpXsY:                       # <-- the dedicated FRI NIC (find via `ip link`)
+      dhcp4: false
+      dhcp6: false
+      addresses:
+        - 172.31.1.150/16         # host on the KUKA KLI subnet (mask 255.255.0.0 - KUKA default)
+      # no gateway4/routes/nameservers: this link carries only FRI traffic to the cabinet

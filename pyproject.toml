@@ -1,0 +1,29 @@
+[project]
+name = "lbr_med_stack"
+version = "0.1.0"
+description = "ROS 2 Jazzy overlay scaffold for the KUKA LBR Med 7 R800 (FRI 1.15, lbr-stack)."
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"          # ROS 2 Jazzy ships on Ubuntu 24.04 / Python 3.12
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]   # pyflakes, pycodestyle, isort, bugbear, pyupgrade, simplify
+ignore = ["E501"]                 # let the formatter own line length
+
+[tool.basedpyright]
+typeCheckingMode = "standard"     # standard, per CODE_STANDARDS; not recommended/all
+pythonVersion = "3.12"
+include = ["examples"]            # the only first-party Python in this repo
+exclude = ["**/__pycache__", "**/.venv", "src", "build", "install", "log"]
+# ROS 2 packages (rclpy, geometry_msgs, moveit) resolve from /opt/ros/jazzy at analysis time, not pip.
+# Run the gate on a sourced ROS 2 Jazzy machine so these imports resolve; extraPaths adds the
+# ament site-packages if AMENT_PREFIX_PATH is not already on sys.path for the checker.
+extraPaths = ["/opt/ros/jazzy/lib/python3.12/site-packages"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "basedpyright>=1.8",
+]

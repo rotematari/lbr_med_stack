@@ -1,0 +1,13 @@
+# lbr_med_stack.repos - pinned vcs manifest for the KUKA LBR Med 7 R800 overlay.
+# Pairs with FRI_CLIENT_VERSION=1.15 (matches Sunrise.OS Med 1.15).
+# Usage:
+#   export FRI_CLIENT_VERSION=1.15
+#   vcs import src < lbr_med_stack.repos
+#   vcs import src < src/lbr_fri_ros2_stack/lbr_fri_ros2_stack/repos-fri-1.15.yaml
+#   rosdep install --from-paths src -i -r -y
+#   colcon build --symlink-install
+repositories:
+  lbr_fri_ros2_stack:
+    type: git
+    url: https://github.com/lbr-stack/lbr_fri_ros2_stack.git
+    version: jazzy-v2.4.3   # PINNED - latest jazzy release as of 2026-06-11; bump deliberately
