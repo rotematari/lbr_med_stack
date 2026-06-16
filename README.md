@@ -9,7 +9,6 @@ reuses that stack's launch files and stock MoveIt config, and ships only:
 
 - a pinned overlay manifest (`lbr_med_stack.repos`),
 - the four setup docs in [`docs/`](docs/),
-- a drop-in netplan file for the FRI subnet ([`config/netplan/99-fri-x66.yaml`](config/netplan/99-fri-x66.yaml)),
 - one `MoveItPy` go-to-pose example ([`examples/goto_pose/`](examples/goto_pose/)).
 
 No custom controllers, no MoveIt fork, no wrapper layer. Impedance / torque streaming is documented future scope.
@@ -66,8 +65,6 @@ lbr_med_stack/
 ├── LICENSE                         # Apache-2.0
 ├── lbr_med_stack.repos             # pinned vcs manifest (lbr_fri_ros2_stack@jazzy-v2.4.3)
 ├── .gitignore                      # src/ build/ install/ log/ (vcs sources never committed)
-├── config/
-│   └── netplan/99-fri-x66.yaml     # drop-in static NIC config for the FRI subnet
 ├── docs/
 │   ├── 01_fresh_machine_setup.md   # ROS 2 Jazzy + overlay from scratch
 │   ├── 02_network_setup.md         # FRI subnet, netplan, connectivity checks

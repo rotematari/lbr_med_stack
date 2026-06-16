@@ -12,7 +12,7 @@ No robot required for any step here.
 
 ## 1. Install ROS 2 Jazzy
 
-Follow the official guide: <https://docs.ros.org/en/jazzy/Installation.html>. The apt path in brief:
+Follow the official guide: [https://docs.ros.org/en/jazzy/Installation.html](https://docs.ros.org/en/jazzy/Installation.html). The apt path in brief:
 
 ```bash
 sudo apt update && sudo apt install -y software-properties-common curl
@@ -70,13 +70,14 @@ export FRI_CLIENT_VERSION=1.15
 ```
 
 ## 5. Create the overlay workspace and import sources
-
+in your repo directory:
 ```bash
-mkdir -p ~/lbr_med_ws/src && cd ~/lbr_med_ws
+mkdir -p lbr_med_ws/src && cd lbr_med_ws
 
 # pinned stack first, then the FRI SDK manifest the stack ships
-vcs import src < /path/to/lbr_med_stack/lbr_med_stack.repos
-vcs import src < src/lbr_fri_ros2_stack/lbr_fri_ros2_stack/repos-fri-1.15.yaml
+git clone https://github.com/lbr-stack/lbr_fri_ros2_stack.git -b jazzy src/lbr_fri_ros2_stack
+vcs import src < src/lbr_fri_ros2_stack/lbr_fri_ros2_stack/repos-fri-${FRI_CLIENT_VERSION}.yaml
+rosdep install --from-paths src -i -r -y
 ```
 
 > [VERIFY ON FIRST RUN] The path `src/lbr_fri_ros2_stack/lbr_fri_ros2_stack/repos-fri-1.15.yaml`
