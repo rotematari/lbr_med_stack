@@ -1,0 +1,26 @@
+# MoveItPy (moveit_cpp) runtime configuration for the goto_pose node.
+#
+# The med7 MoveItConfigsBuilder .to_dict() (the move_group layout) injects robot_description, SRDF,
+# kinematics, and OMPL planner configs, but NOT the moveit_cpp-specific keys below: MoveItPy's own
+# loader reads a NESTED planning_pipelines.pipeline_names (not the flat move_group list) plus a
+# default plan_request_params. Without this file MoveItPy aborts with
+# "Failed to load planning pipelines from parameter server" before any plan is attempted.
+#
+# Topics are relative so they resolve under the node's /lbr namespace (joint_states -> /lbr/joint_states).
+planning_scene_monitor_options:
+  name: "planning_scene_monitor"
+  robot_description: "robot_description"
+  joint_state_topic: "joint_states"
+  attached_collision_object_topic: "attached_collision_object"
+  publish_planning_scene_topic: "publish_planning_scene"
+  monitored_planning_scene_topic: "monitored_planning_scene"
+  wait_for_initial_state_timeout: 10.0
+
+planning_pipelines:
+  pipeline_names: ["ompl"]
+
+plan_request_params:
+  planning_attempts: 1
+  planning_pipeline: ompl
+  max_velocity_scaling_factor: 1.0
+  max_acceleration_scaling_factor: 1.0

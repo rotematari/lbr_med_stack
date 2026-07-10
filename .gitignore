@@ -1,5 +1,7 @@
 # colcon workspace artifacts and vcs-imported sources (never committed)
-src/
+src/*
+# ...except the first-party package, which is committed
+!src/lbr_med_examples/
 build/
 install/
 log/

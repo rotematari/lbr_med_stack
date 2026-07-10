@@ -9,7 +9,8 @@ reuses that stack's launch files and stock MoveIt config, and ships only:
 
 - a pinned overlay manifest (`lbr_med_stack.repos`),
 - the four setup docs in [`docs/`](docs/),
-- one `MoveItPy` go-to-pose example ([`examples/goto_pose/`](examples/goto_pose/)).
+- one first-party `ament_python` package with a `MoveItPy` go-to-pose example and launch file
+  ([`src/lbr_med_examples/`](src/lbr_med_examples/)).
 
 No custom controllers, no MoveIt fork, no wrapper layer. Impedance / torque streaming is documented future scope.
 
@@ -50,7 +51,9 @@ ros2 launch lbr_bringup move_group.launch.py model:=med7 mode:=mock rviz:=true
 > `move_group.launch.py`, `model:=med7`, `mode:=mock`) are taken from lbr-stack's documented flow.
 > Confirm against the pinned tag with `ros2 launch lbr_bringup <file> -s` before relying on them.
 
-Run the go-to-pose example: see [`examples/goto_pose/README.md`](examples/goto_pose/README.md).
+Run the go-to-pose example (recommended path is the launch file, which injects the med7 MoveIt config
+and namespaces the node under `/lbr`): see
+[`src/lbr_med_examples/README.md`](src/lbr_med_examples/README.md).
 
 For the real robot, do **not** start here. Work through the network, Sunrise-side, and bringup docs in order:
 [`docs/02_network_setup.md`](docs/02_network_setup.md) ->
@@ -70,13 +73,20 @@ lbr_med_stack/
 │   ├── 02_network_setup.md         # FRI subnet, netplan, connectivity checks
 │   ├── 03_sunrise_side_setup.md    # cabinet-side Sunrise / LBRServer setup
 │   └── 04_hardware_bringup_checklist.md  # phased mock -> real bringup
-└── examples/
-    └── goto_pose/
-        ├── goto_pose.py            # thin MoveItPy plan+execute to a CLI pose
-        └── README.md               # mock-first usage
+└── src/
+    └── lbr_med_examples/           # first-party ament_python package (committed)
+        ├── package.xml
+        ├── setup.py / setup.cfg
+        ├── resource/lbr_med_examples
+        ├── lbr_med_examples/goto_pose.py    # thin MoveItPy plan+execute to a CLI pose
+        ├── launch/goto_pose.launch.py       # injects med7 config, namespaces node under /lbr
+        ├── test/test_copyright.py
+        └── README.md               # run-via-launch usage
 ```
 
-`src/`, `build/`, `install/`, `log/` are git-ignored. The vendored sources come from `vcs import`, not from this repo.
+`build/`, `install/`, `log/` and the **vcs-imported** upstream under `src/` (`src/fri`,
+`src/lbr_fri_ros2_stack`, `src/lbr_fri_idl`) are git-ignored; only `src/lbr_med_examples/` is
+committed. The vendored sources come from `vcs import`, not from this repo.
 
 ## Versioning
 
