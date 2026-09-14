@@ -6,14 +6,12 @@ CLI-to-MoveItPy bridge, no wrapper layer.
 
 ## Prerequisites
 
-The launch file couples to the sibling `lbr_med_ws` overlay: `lbr_bringup` (the launch mixin) and
-`med7_moveit_config` / `lbr_description` (the MoveIt config packages) live there, not in this repo.
-Source both underlays plus this overlay before running:
+Build the repository as one overlay workspace. The pinned upstream packages and this first-party
+package are installed together, so every shell needs the ROS underlay and this checkout's overlay:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-source /path/to/lbr_med_ws/install/setup.bash   # upstream: lbr_bringup, med7_moveit_config
-source install/setup.bash                        # this overlay (after colcon build)
+source /path/to/lbr_med_stack/install/setup.bash
 ```
 
 ## Run via launch (recommended)
@@ -45,6 +43,16 @@ real hardware.
 
 `x/y/z` default to `0.4 / 0.0 / 0.6` (a safe mid-workspace mock target, well inside the 800 mm reach),
 so a bare `ros2 launch lbr_med_examples goto_pose.launch.py` runs the known-good target.
+
+### Jazzy 2.12.4 teardown limitation
+
+On Ubuntu's `ros-jazzy-moveit-py` 2.12.4, MoveItPy can segfault while destroying `MoveItCpp` after
+a successful plan and execution. The upstream issue is
+[`moveit2#3721`](https://github.com/moveit/moveit2/issues/3721); it reproduces even when
+`MoveItPy.shutdown()` is called explicitly. Treat `Completed trajectory execution with status
+SUCCEEDED` as evidence for the mock plan/execution gate, and record the final process status
+separately until the upstream package fixes teardown. Do not hide the crash with a forced process
+exit, because that would mask other cleanup failures.
 
 ## Legacy / broken invocation (do not use)
 

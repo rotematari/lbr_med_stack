@@ -2,7 +2,7 @@
 name = "lbr_med_stack"
 version = "0.1.0"
 description = "ROS 2 Jazzy overlay scaffold for the KUKA LBR Med 7 R800 (FRI 1.15, lbr-stack)."
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = []
 
 [tool.ruff]

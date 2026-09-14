@@ -175,7 +175,7 @@ complete on its own, but to see motion you bring up the ROS side on the separate
   `client_command_mode: position`. FRI is **UDP** on port **30200**.
 - ROS host network + connectivity checks: [`02_network_setup.md`](02_network_setup.md).
 - Phased mock -> real bringup (start at Phase 0): [`04_hardware_bringup_checklist.md`](04_hardware_bringup_checklist.md).
-- First real move at reduced speed: [`examples/goto_pose/README.md`](../examples/goto_pose/README.md).
+- First real move at reduced speed: [`src/lbr_med_examples/README.md`](../src/lbr_med_examples/README.md).
 
 ## Appendix - Cabinet on a different FRI version
 

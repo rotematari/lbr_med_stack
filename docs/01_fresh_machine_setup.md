@@ -54,11 +54,14 @@ rosdep update
 ```bash
 sudo apt install -y \
   ros-jazzy-moveit \
+  ros-jazzy-moveit-servo \
   ros-jazzy-ros2-control \
   ros-jazzy-ros2-controllers
 ```
 
 `mock_components` (the fake hardware interface the mock bringup uses) ships with `ros-jazzy-ros2-control`.
+`moveit_servo` is an upstream runtime dependency of `lbr_bringup`, even though the basic mock and
+go-to-pose flow does not launch Servo.
 
 ## 4. Set the FRI client version
 
@@ -69,39 +72,59 @@ echo 'export FRI_CLIENT_VERSION=1.15' >> ~/.bashrc
 export FRI_CLIENT_VERSION=1.15
 ```
 
-## 5. Create the overlay workspace and import sources
-in your repo directory:
-```bash
-mkdir -p lbr_med_ws/src && cd lbr_med_ws
+## 5. Clone the overlay workspace and import sources
 
-# pinned stack first, then the FRI SDK manifest the stack ships
-git clone https://github.com/lbr-stack/lbr_fri_ros2_stack.git -b jazzy src/lbr_fri_ros2_stack
-vcs import src < src/lbr_fri_ros2_stack/lbr_fri_ros2_stack/repos-fri-${FRI_CLIENT_VERSION}.yaml
-rosdep install --from-paths src -i -r -y
+```bash
+git clone https://github.com/rotematari/lbr_med_stack.git
+cd lbr_med_stack
+
+# The manifest contains exact revisions for lbr-stack, FRI 1.15, and the matching IDL.
+vcs import src < lbr_med_stack.repos
+vcs status src
 ```
 
-> [VERIFY ON FIRST RUN] The path `src/lbr_fri_ros2_stack/lbr_fri_ros2_stack/repos-fri-1.15.yaml`
-> is where the FRI manifest lives in lbr-stack's documented layout. If the second import fails on a
-> missing file, locate it with `find src -name 'repos-fri-1.15.yaml'` and import that path.
+The committed `src/lbr_med_examples` package remains in place; `vcs` creates the three ignored
+upstream checkouts beside it.
 
 ## 6. Resolve dependencies and build
 
 ```bash
-rosdep install --from-paths src -i -r -y
-colcon build --symlink-install
+rosdep install --from-paths src --ignore-src -r -y --rosdistro jazzy
+colcon build --symlink-install --event-handlers console_direct+
 ```
 
-## 7. Source the overlay and sanity check
+Run the build from the repository root without an activated virtual environment. This keeps ROS
+entry-point shebangs on Ubuntu's `/usr/bin/python3` and avoids binding the install tree to a moved
+virtual environment.
+
+## 7. Create the Python tooling environment
+
+ROS Jazzy extensions are built for Ubuntu's Python 3.12. Create a system-Python virtual environment
+that can see those packages, then install the locked development tools with `uv`:
 
 ```bash
-source install/setup.bash
-ros2 pkg list | grep lbr
+uv venv --clear --python /usr/bin/python3.12 --system-site-packages .venv
+source .venv/bin/activate
+uv sync --active --locked
+source /opt/ros/jazzy/setup.bash
+python -c "import rclpy, geometry_msgs, moveit.planning"
 ```
 
-You should see `lbr_bringup`, `lbr_description`, and the med7 MoveIt config among the listed packages.
+Recreate `.venv` after moving the checkout; virtual-environment scripts contain absolute paths.
+ROS packages continue to come from apt and the colcon overlay, while `uv.lock` covers Python-only
+development tools.
 
-> [VERIFY ON FIRST RUN] The exact med7 MoveIt config package name is provided by the pinned tag and is
-> not hard-coded here; the bringup is driven by `lbr_bringup` launch files with `model:=med7`.
+## 8. Source the overlay and sanity check
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 pkg prefix lbr_bringup
+ros2 pkg prefix med7_moveit_config
+ros2 pkg prefix lbr_med_examples
+```
+
+All three commands should resolve inside this checkout's `install/` directory.
 
 ## Next
 

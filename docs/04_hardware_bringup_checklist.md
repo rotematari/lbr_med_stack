@@ -9,7 +9,7 @@ Phased path from mock (no robot) to real-robot MoveIt. Work the phases in order.
 This is the on-machine gate. No network, no cabinet.
 
 - [ ] Overlay builds clean: `colcon build --symlink-install` exits 0 (see `01_fresh_machine_setup.md`).
-- [ ] Overlay sourced: `source ~/lbr_med_ws/install/setup.bash`.
+- [ ] Overlay sourced from the relocated checkout: `source install/setup.bash`.
 - [ ] Mock hardware comes up, no error:
 
 ```bash
@@ -24,13 +24,18 @@ ros2 launch lbr_bringup move_group.launch.py model:=med7 mode:=mock rviz:=true
 ```
 
 - [ ] In RViz, plan and execute a goal to confirm the planning pipeline works on mock.
-- [ ] Confirm `move_group` is live: `ros2 topic list | grep move_group`.
+- [ ] Confirm `move_group` is live: `ros2 node info /lbr/move_group` exits 0.
 
-> [VERIFY ON FIRST RUN] The launch-file names and args (`mock.launch.py`, `move_group.launch.py`,
-> `model:=med7`, `mode:=mock`, `rviz:=true`) follow lbr-stack's documented flow. Confirm exact names/args on
-> the pinned tag with `ros2 launch lbr_bringup <file> -s`.
+The launch-file names and arguments above are verified against the pinned `jazzy-v2.4.3` source.
 
 **Gate:** Phase 0 must pass before any real-robot work.
+
+The `goto_pose` mock example currently has a separate upstream teardown limitation on Jazzy's
+MoveItPy 2.12.4: planning and mock execution can report `SUCCEEDED`, followed by a process SIGSEGV
+while `MoveItCpp` is destroyed. See `src/lbr_med_examples/README.md`; record execution and teardown
+as separate results until `moveit2#3721` is fixed upstream. The standalone `move_group` process can
+also segfault while its executor is destroyed after SIGINT (`moveit2#3680`); this happens during
+shutdown, after the live-node and planning checks above.
 
 ## Phase 1 - Real robot prerequisites (no motion yet)
 
@@ -62,7 +67,7 @@ ros2 launch lbr_bringup hardware.launch.py model:=med7
 
 - [ ] Start MoveIt against real hardware (the `mode:=mock` of Phase 0 becomes the real mode for the tag).
 - [ ] **E-stop in hand. Reduced speed first.** Set MoveIt velocity/acceleration scaling low.
-- [ ] Run the `goto_pose` example at low speed to a conservative, reachable pose (see `examples/goto_pose/README.md`).
+- [ ] Run the `goto_pose` example at low speed to a conservative, reachable pose (see `src/lbr_med_examples/README.md`).
 - [ ] Confirm planned trajectory in RViz **before** executing on the real arm.
 
 > [VERIFY ON FIRST RUN] The MoveIt real-hardware mode value for `move_group.launch.py` on the pinned tag

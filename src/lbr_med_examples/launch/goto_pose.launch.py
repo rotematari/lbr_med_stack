@@ -18,8 +18,8 @@ MoveItPy no robot_description / SRDF / kinematics / OMPL parameters and ran in t
 so RDFLoader timed out after 10 s. Here the node is launched under the ``/lbr`` namespace (matching
 move_group) with the full med7 config injected as per-node parameters via ``moveit_config.to_dict()``.
 
-Requires the sibling ``lbr_med_ws`` overlay to be sourced: ``lbr_bringup`` (the mixin) and
-``med7_moveit_config`` / ``lbr_description`` (the config packages) live there, not in this repo.
+Requires this repository's colcon overlay to be built and sourced. It installs ``lbr_bringup``,
+``med7_moveit_config``, ``lbr_description``, and this package together.
 """
 
 import os
@@ -41,8 +41,8 @@ def _setup(context: LaunchContext) -> list[LaunchDescriptionEntity]:
     """
     # Imported lazily so `-s` introspection and `ruff`/`basedpyright` do not hard-require the sibling
     # overlay on sys.path; the import only fires when the launch actually runs against a sourced ws.
-    # basedpyright cannot see lbr_bringup: it lives in the sibling lbr_med_ws overlay's install, not
-    # /opt/ros/jazzy, and is not on the checker's search path. Resolves at runtime under a sourced ws.
+    # basedpyright cannot see lbr_bringup before the colcon overlay is built and sourced. It resolves
+    # at runtime from this repository's install tree.
     from lbr_bringup.moveit import LBRMoveGroupMixin  # pyright: ignore[reportMissingImports]
 
     model = LaunchConfiguration("model").perform(context)

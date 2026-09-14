@@ -17,26 +17,29 @@ No custom controllers, no MoveIt fork, no wrapper layer. Impedance / torque stre
 ## What you need
 
 - Ubuntu 24.04 (Noble) with **ROS 2 Jazzy** (`/opt/ros/jazzy`).
-- `ros-jazzy-moveit`, `ros-jazzy-ros2-control`, `ros-jazzy-ros2-controllers` (mock hardware ships here).
+- `ros-jazzy-moveit`, `ros-jazzy-moveit-servo`, `ros-jazzy-ros2-control`, and
+  `ros-jazzy-ros2-controllers` (mock hardware ships here).
 - Build tooling: `python3-colcon-common-extensions`, `python3-vcstool`, `python3-rosdep`.
 
 Full first-time setup is in [`docs/01_fresh_machine_setup.md`](docs/01_fresh_machine_setup.md).
 
 ## Quickstart (mock, no robot)
 
-From a clean overlay workspace:
+The repository is the overlay workspace; the committed example package and pinned
+upstream sources are built together:
 
 ```bash
-mkdir -p ~/lbr_med_ws/src && cd ~/lbr_med_ws
+git clone https://github.com/rotematari/lbr_med_stack.git
+cd lbr_med_stack
+source /opt/ros/jazzy/setup.bash
 export FRI_CLIENT_VERSION=1.15
 
-# 1. pull the pinned stack, then the FRI SDK manifest the stack ships
-vcs import src < /path/to/lbr_med_stack/lbr_med_stack.repos
-vcs import src < src/lbr_fri_ros2_stack/lbr_fri_ros2_stack/repos-fri-1.15.yaml
+# 1. pull the stack, FRI SDK, and IDL at their exact pinned revisions
+vcs import src < lbr_med_stack.repos
 
 # 2. resolve dependencies and build
-rosdep install --from-paths src -i -r -y
-colcon build --symlink-install
+rosdep install --from-paths src --ignore-src -r -y --rosdistro jazzy
+colcon build --symlink-install --event-handlers console_direct+
 
 # 3. source the overlay
 source install/setup.bash
@@ -47,9 +50,9 @@ ros2 launch lbr_bringup mock.launch.py model:=med7
 ros2 launch lbr_bringup move_group.launch.py model:=med7 mode:=mock rviz:=true
 ```
 
-> [VERIFY ON FIRST RUN] The exact `lbr_bringup` launch-file names and arguments (`mock.launch.py`,
-> `move_group.launch.py`, `model:=med7`, `mode:=mock`) are taken from lbr-stack's documented flow.
-> Confirm against the pinned tag with `ros2 launch lbr_bringup <file> -s` before relying on them.
+The launch files and these arguments are verified against the pinned `jazzy-v2.4.3` source. You can
+inspect the installed interface at any time with `ros2 launch lbr_bringup mock.launch.py -s` and
+`ros2 launch lbr_bringup move_group.launch.py -s`.
 
 Run the go-to-pose example (recommended path is the launch file, which injects the med7 MoveIt config
 and namespaces the node under `/lbr`): see
@@ -66,7 +69,8 @@ For the real robot, do **not** start here. Work through the network, Sunrise-sid
 lbr_med_stack/
 ├── README.md                       # this file
 ├── LICENSE                         # Apache-2.0
-├── lbr_med_stack.repos             # pinned vcs manifest (lbr_fri_ros2_stack@jazzy-v2.4.3)
+├── lbr_med_stack.repos             # exact upstream stack, FRI 1.15, and IDL pins
+├── .python-version / uv.lock       # Python 3.12 tooling environment
 ├── .gitignore                      # src/ build/ install/ log/ (vcs sources never committed)
 ├── docs/
 │   ├── 01_fresh_machine_setup.md   # ROS 2 Jazzy + overlay from scratch
@@ -90,16 +94,16 @@ committed. The vendored sources come from `vcs import`, not from this repo.
 
 ## Versioning
 
-`lbr_med_stack.repos` pins `lbr_fri_ros2_stack` to a **tag** (`jazzy-v2.4.3`), not the moving `jazzy` branch,
-for reproducible builds. The FRI SDK (`lbr-stack/fri`) is pulled by the stack's own `repos-fri-1.15.yaml`,
-imported as the second `vcs import` step. Do not hand-pin the FRI tag; take it from that manifest.
+`lbr_med_stack.repos` pins `lbr_fri_ros2_stack` to the **tag** `jazzy-v2.4.3` and pins the FRI 1.15 SDK
+and matching IDL to exact commits. A single `vcs import` therefore recreates the source set without
+following any moving branch.
 
 ### Bumping the pinned tag
 
 1. Pick the new tag from the [lbr_fri_ros2_stack releases](https://github.com/lbr-stack/lbr_fri_ros2_stack/releases).
    Confirm it targets ROS 2 Jazzy and check its `CHANGELOG` for breaking launch-file or config changes.
 2. Edit the `version:` field in `lbr_med_stack.repos` to the new tag.
-3. Re-run the quickstart in a **clean** `~/lbr_med_ws` (do not reuse a stale `src/`).
+3. Update all three exact revisions in `lbr_med_stack.repos`, then re-run the quickstart in a clean clone.
 4. Re-verify the mock bringup gate (Phase 0 in `docs/04_hardware_bringup_checklist.md`) before touching the real robot.
 5. If the FRI client version changes with the new release, update `FRI_CLIENT_VERSION` and the Sunrise.OS pairing in the docs.
 
