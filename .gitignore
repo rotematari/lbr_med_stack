@@ -9,3 +9,6 @@ log/
 # python tooling caches
 __pycache__/
 .ruff_cache/
+
+# Graphify generated outputs (rebuild locally; do not commit)
+graphify-out/
