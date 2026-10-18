@@ -1,0 +1,26 @@
+syntax = "proto2";
+package lbr.acquisition.v1;
+
+message State {
+  required uint32 schema_version = 1;
+  required uint64 state_id = 2;
+  required uint64 host_monotonic_ns = 3;
+  optional uint32 controller_sec = 4;
+  optional uint32 controller_nsec = 5;
+  optional double reported_sample_period_s = 6;
+  optional uint32 session_state = 7;
+  optional uint32 connection_quality = 8;
+  optional uint32 control_mode = 9;
+  optional uint32 client_command_mode = 10;
+  repeated double q_measured_rad = 11 [packed = true];
+  required uint32 nonfinite_joint_mask = 12;
+}
+
+message Submission {
+  required uint32 schema_version = 1;
+  required uint64 submission_id = 2;
+  required uint64 state_id = 3;
+  required uint64 host_monotonic_ns = 4;
+  repeated double q_submitted_rad = 5 [packed = true];
+  required uint32 nonfinite_joint_mask = 6;
+}

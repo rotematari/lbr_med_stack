@@ -12,3 +12,7 @@ __pycache__/
 
 # Graphify generated outputs (rebuild locally; do not commit)
 graphify-out/
+
+# First-party offline acquisition package
+!src/lbr_acquisition/
+!src/lbr_acquisition/**
