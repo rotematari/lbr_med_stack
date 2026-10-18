@@ -1,0 +1,18 @@
+[
+  {
+    "checkout": "packages/lbr-med-stack/src/lbr_fri_ros2_stack",
+    "base_commit": "14ecad839f482da0ee4ac4b9d222d0787db3bf11",
+    "patch": "package-stack.patch",
+    "modified_sha256": {
+      "lbr_moveit_config/med7_moveit_config/config/moveit.rviz": "ff547efd4d0336be0516ca13d35ba229acd738a257cd52ddcfbd728f9d648be4"
+    }
+  },
+  {
+    "checkout": "03_projects/lbr_med/lbr_med_ws/src/lbr_fri_ros2_stack",
+    "base_commit": "dab3f7561e8a2cbefccd48b5edaf1a1663a8c6d9",
+    "patch": "legacy-workspace.patch",
+    "modified_sha256": {
+      "lbr_moveit_config/med7_moveit_config/config/moveit.rviz": "e27d0275f024ebf1af1621412e7bee999ca634058fe4e79e4cd8e1c4c7099109"
+    }
+  }
+]
