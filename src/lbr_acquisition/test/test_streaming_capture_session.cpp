@@ -1,4 +1,6 @@
 #include "lbr_acquisition/streaming_capture_session.hpp"
+#include "lbr_acquisition/capture_encoding.hpp"
+#include "lbr_acquisition/readback.hpp"
 #include <cassert>
 #include <atomic>
 #include <cerrno>
@@ -22,6 +24,11 @@ template <class Predicate> static bool until(Predicate predicate) {
     std::this_thread::sleep_for(1ms);
   }
   return predicate();
+}
+static std::string read(const fs::path &path) {
+  std::ifstream input(path, std::ios::binary);
+  assert(input);
+  return {std::istreambuf_iterator<char>(input), {}};
 }
 int main(int argc, char **argv) {
   const bool fixtures = argc == 4 && std::string(argv[1]) == "--fixtures";
@@ -60,6 +67,44 @@ int main(int argc, char **argv) {
     assert(fs::exists(root / "manual/events.jsonl"));
     assert(fs::exists(root / "manual/session.log"));
     session.join();
+  }
+  // PHD-FRI-RECORDER: live provenance must survive every storage layer.
+  {
+    StreamingCaptureSession session({117, 1000000000ULL, 500000000ULL, 10, 8},
+                                    root / "fri-manual", descriptor, io, 1ms, 500ms,
+                                    nullptr, 32, CaptureSource::FriSdk);
+    assert(session.source() == CaptureSource::FriSdk);
+    assert(session.start());
+    capture::Event event{};
+    event.run_id = 117; event.kind = capture::Kind::State;
+    event.id = event.state_id = 1; event.host_monotonic_ns = session.now_ns();
+    event.position = {.125, -.25, .375, -.5, .625, -.75, .875};
+    assert(session.offer(event) == capture::Offer::Accepted);
+    assert(session.request_stop(117));
+    session.join();
+    assert(session.status().outcome_published);
+    const auto manifest = read(root / "fri-manual/manifest.json");
+    const auto outcome = read(root / "fri-manual.capture.json");
+    const auto events = read(root / "fri-manual/events.jsonl");
+    const auto log = read(root / "fri-manual/session.log");
+    assert(manifest.find("\"profile\":\"fri-capture-v1\"") != std::string::npos);
+    assert(manifest.find("\"source\":\"fri-sdk\"") != std::string::npos);
+    assert(manifest.find("synthetic") == std::string::npos);
+    assert(outcome.find("\"profile\":\"fri-capture-outcome-v1\"") != std::string::npos);
+    assert(outcome.find("\"source\":\"fri-sdk\"") != std::string::npos);
+    assert(events.find("\"source\":\"fri-sdk\"") != std::string::npos);
+    assert(log.find("source=fri-sdk") != std::string::npos);
+    assert(log.find("offline recorder session only") == std::string::npos);
+    const auto expected = encode_capture_batch({event}, 117);
+    assert(verify_container(root / "fri-manual/signals.mcap", expected,
+                            read(descriptor), CaptureSource::FriSdk) ==
+           CaptureSource::FriSdk);
+    bool source_mismatch = false;
+    try {
+      verify_container(root / "fri-manual/signals.mcap", expected,
+                       read(descriptor), CaptureSource::Synthetic);
+    } catch (const IoError &) { source_mismatch = true; }
+    assert(source_mismatch);
   }
   {
     StreamingCaptureSession session({18, 1000000000ULL, 20000000ULL, 10, 8},

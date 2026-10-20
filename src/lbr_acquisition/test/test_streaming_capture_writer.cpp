@@ -12,6 +12,40 @@
 using namespace lbr_acquisition;
 namespace fs = std::filesystem;
 int main(int argc, char **argv) {
+  if (argc == 5 && std::string(argv[1]) == "--large-run") {
+    const auto count = std::stoull(argv[2]);
+    const auto limits = capture_limits_for(count);
+    FileOps io;
+    StreamingCaptureWriter writer(17, argv[3], argv[4], io, CaptureSource::FriSdk, limits);
+    capture::Event e{};
+    e.run_id = 17; e.kind = capture::Kind::State;
+    e.torque_presence = 7;
+    e.tau_measured_nm.fill(1.25); e.tau_commanded_nm.fill(-2.5);
+    e.tau_external_estimated_nm.fill(.375);
+    for (uint64_t i = 1; i <= count; ++i) {
+      e.id = e.state_id = i; e.host_monotonic_ns = i * 1000000;
+      writer.write(e);
+    }
+    assert(writer.summary().events == count && writer.summary().states == count);
+    writer.finish();
+    std::ifstream f(argv[4], std::ios::binary);
+    const std::string descriptor(std::istreambuf_iterator<char>{f}, {});
+    auto wrong = writer.summary(); wrong.digest[0] ^= 1;
+    bool rejected = false;
+    try { verify_capture_container(fs::path(argv[3]) / "signals.mcap", wrong,
+                                  descriptor, CaptureSource::FriSdk, limits); }
+    catch (const IoError &) { rejected = true; }
+    assert(rejected); // Intact file must not match an incorrect expected digest.
+    capture::Status status{};
+    status.phase = capture::Phase::Complete; status.reason = capture::Reason::Duration;
+    status.writer_done = true; status.has_first = true;
+    status.first_state_ns = 1000000; status.last_state_ns = count * 1000000;
+    status.attempted = status.enqueued = status.written = count;
+    write_capture_outcome(writer, status, io);
+    std::cout << count << " records verified with fixed summary size "
+              << sizeof(writer.summary()) << " bytes\n";
+    return 0;
+  }
   if (argc == 4 && std::string(argv[1]) == "--hold-prefix") {
     FileOps io;
     capture::Event e{};
@@ -45,7 +79,7 @@ int main(int argc, char **argv) {
   auto before = fs::file_size(run / "signals.mcap.partial");
   writer.write(e);
   assert(fs::file_size(run / "signals.mcap.partial") > before);
-  assert(writer.staged_events().size() == 1);
+  assert(writer.summary().events == 1);
   writer.finish();
   assert(writer.state() == StreamingCaptureWriter::State::Finalized);
   assert(!fs::exists(run / "signals.mcap.partial"));
@@ -95,7 +129,7 @@ int main(int argc, char **argv) {
     bool rejected = false;
     try { invalid.write(wrong); } catch (const InvalidInput &) { rejected = true; }
     assert(rejected && invalid.state() == StreamingCaptureWriter::State::Failed);
-    assert(invalid.staged_events().empty());
+    assert(invalid.summary().events == 0);
     assert(!fs::exists(root / "invalid-event/signals.mcap"));
   }
   {
@@ -146,7 +180,7 @@ int main(int argc, char **argv) {
   bool threw = false;
   try { ambiguous.write(e); } catch (const std::runtime_error &) { threw = true; }
   assert(threw && fault.hit && ambiguous.state() == StreamingCaptureWriter::State::Failed);
-  assert(ambiguous.staged_events().empty());
+  assert(ambiguous.summary().events == 0);
   assert(fs::exists(root / "ambiguous/signals.mcap.partial"));
   assert(!fs::exists(root / "ambiguous/signals.mcap"));
   fs::remove_all(root);

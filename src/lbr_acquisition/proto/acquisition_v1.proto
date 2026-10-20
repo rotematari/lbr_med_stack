@@ -14,6 +14,11 @@ message State {
   optional uint32 client_command_mode = 10;
   repeated double q_measured_rad = 11 [packed = true];
   required uint32 nonfinite_joint_mask = 12;
+  // Each torque signal is independently unavailable (0 values) or contains
+  // exactly 7 values in A1..A7 order. Zero and nonfinite readings remain data.
+  repeated double tau_measured_nm = 13 [packed = true];
+  repeated double tau_commanded_nm = 14 [packed = true];
+  repeated double tau_external_estimated_nm = 15 [packed = true];
 }
 
 message Submission {

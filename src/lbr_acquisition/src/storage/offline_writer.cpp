@@ -163,9 +163,16 @@ struct EventValidator {
   uint64_t last_state = 0, last_submission = 0, last_host = 0;
   bool first = true;
   std::vector<std::string> issues;
-  size_t count = 0;
+  uint64_t count = 0;
+  CaptureLimits limits{};
+  bool latest_state_only = false;
+  void issue(const std::string &message) {
+    // These are finite diagnostic categories, not a per-record history.
+    if (!latest_state_only || std::find(issues.begin(), issues.end(), message) == issues.end())
+      issues.push_back(message);
+  }
   void accept(const OfflineEvent &event) {
-    if (++count > 10000) throw InvalidInput("event limit");
+    if (++count > limits.events) throw InvalidInput("event limit");
     std::visit(
         [&](const auto &m) {
           using T = std::decay_t<decltype(m)>;
@@ -177,7 +184,7 @@ struct EventValidator {
           if (m.ByteSizeLong() > 4096)
             throw InvalidInput("payload limit");
           if (!first && m.host_monotonic_ns() < last_host)
-            issues.push_back("disordered host timestamp");
+            issue("disordered host timestamp");
           first = false;
           last_host = m.host_monotonic_ns();
           const google::protobuf::RepeatedField<double> *q;
@@ -185,26 +192,37 @@ struct EventValidator {
             if (m.state_id() <= last_state)
               throw InvalidInput("state IDs must increase and be positive");
             last_state = m.state_id();
-            states.insert(last_state);
+            if (!latest_state_only) states.insert(last_state);
             q = &m.q_measured_rad();
+            const std::pair<const char *, const google::protobuf::RepeatedField<double> *> torques[] = {
+                {"tau_measured_nm", &m.tau_measured_nm()},
+                {"tau_commanded_nm", &m.tau_commanded_nm()},
+                {"tau_external_estimated_nm", &m.tau_external_estimated_nm()}};
+            for (const auto &[name, values] : torques) {
+              if (values->size() != 0 && values->size() != 7)
+                throw InvalidInput(std::string(name) + ": expected zero or seven joints");
+              if (std::any_of(values->begin(), values->end(),
+                              [](double v) { return !std::isfinite(v); }))
+                issue(std::string("nonfinite ") + name);
+            }
             if (m.has_controller_sec() != m.has_controller_nsec())
               throw InvalidInput("one-sided controller clock");
             if (m.has_controller_nsec() && m.controller_nsec() >= 1000000000)
-              issues.push_back("controller nanoseconds out of range");
+              issue("controller nanoseconds out of range");
             if (m.has_reported_sample_period_s() &&
                 (!std::isfinite(m.reported_sample_period_s()) ||
                  m.reported_sample_period_s() <= 0))
-              issues.push_back("invalid sample period");
+              issue("invalid sample period");
             if ((m.has_session_state() && m.session_state() > 4) ||
                 (m.has_connection_quality() && m.connection_quality() > 3) ||
                 (m.has_control_mode() && m.control_mode() > 3) ||
                 (m.has_client_command_mode() && m.client_command_mode() > 3))
-              issues.push_back("unknown SDK code");
+              issue("unknown SDK code");
           } else {
             if (m.submission_id() <= last_submission)
               throw InvalidInput(
                   "submission IDs must increase and be positive");
-            if (!states.count(m.state_id()))
+            if (latest_state_only ? (!last_state || m.state_id() != last_state) : !states.count(m.state_id()))
               throw InvalidInput("submission references unseen state");
             last_submission = m.submission_id();
             q = &m.q_submitted_rad();
@@ -218,7 +236,7 @@ struct EventValidator {
           if (mask != m.nonfinite_joint_mask())
             throw InvalidInput("nonfinite mask mismatch");
           if (mask)
-            issues.push_back("nonfinite joints");
+            issue("nonfinite joints");
         },
         event);
   }
@@ -279,6 +297,8 @@ std::vector<OfflineEvent> synthetic_events() {
 struct IncrementalFixtureWriter::Impl {
   std::filesystem::path dir;
   FileOps &io;
+  const CaptureSource source;
+  const CaptureLimits limits;
   std::string descriptor;
   EventValidator validator;
   int cleanup_close_error = 0;
@@ -290,9 +310,12 @@ struct IncrementalFixtureWriter::Impl {
   bool seen_state = false, seen_submission = false;
 
   Impl(std::filesystem::path directory, const std::filesystem::path &desc,
-       FileOps &file_io)
-      : dir(std::move(directory)), io(file_io),
+       FileOps &file_io, CaptureSource capture_source, CaptureLimits budgets, bool latest_only)
+      : dir(std::move(directory)), io(file_io), source(capture_source), limits(checked_limits(budgets)),
         descriptor(read_bounded(desc, 65536)) {
+    validator.limits = limits;
+    validator.latest_state_only = latest_only;
+    capture_source_name(source); // Reject unknown values before creating output.
     if (descriptor != read_bounded(LBR_BUILD_DESCRIPTOR, 65536))
       throw InvalidInput("descriptor differs from locally generated schema");
     std::error_code ec;
@@ -318,12 +341,17 @@ struct IncrementalFixtureWriter::Impl {
     const auto run_id = id_stream.str();
     text_file(
         dir / "manifest.json",
-        "{\"schema_version\":1,\"profile\":\"offline-fixture-v1\",\"run_id\":" +
+        "{\"schema_version\":1,\"profile\":" + quote(capture_profile(source)) +
+            ",\"run_id\":" +
             quote(run_id) +
-            ",\"source\":\"synthetic\",\"joint_names\":[\"lbr_A1\",\"lbr_A2\","
+            ",\"source\":" + quote(capture_source_name(source)) +
+            ",\"joint_names\":[\"lbr_A1\",\"lbr_A2\","
             "\"lbr_A3\",\"lbr_A4\",\"lbr_A5\",\"lbr_A6\",\"lbr_A7\"],\"units\":"
-            "\"rad\",\"clocks\":{\"host_monotonic_ns\":\"synthetic host "
-            "monotonic nanoseconds\",\"controller\":\"separate unsynchronized "
+            "{\"position\":\"rad\",\"torque\":\"Nm\"},\"clocks\":{\"host_monotonic_ns\":" +
+            quote(source == CaptureSource::Synthetic
+                      ? "synthetic host monotonic nanoseconds"
+                      : "host monotonic nanoseconds at FRI observation") +
+            ",\"controller\":\"separate unsynchronized "
             "seconds and nanoseconds, "
             "optional\"},\"publish_time_available\":false,\"descriptor_"
             "sha256\":" +
@@ -331,18 +359,18 @@ struct IncrementalFixtureWriter::Impl {
             ",\"software_versions\":{\"mcap_cpp\":\"2.1.3\",\"protobuf_cpp\":"
             "\"3.21.12\",\"mcap_commit\":"
             "\"00e47a1ba6901cbc0cf448cccebbc554c545c4fa\"},\"limits\":{\"file_"
-            "bytes\":16777216,\"record_bytes\":1048576,\"payload_bytes\":4096,"
+            "bytes\":" + std::to_string(limits.file_bytes) + ",\"record_bytes\":1048576,\"payload_bytes\":4096,"
             "\"descriptor_bytes\":65536,\"schemas\":2,\"channels\":2,"
-            "\"events\":10000,\"manifest_bytes\":65536},\"events_jsonl\":"
+            "\"events\":" + std::to_string(limits.events) + ",\"manifest_bytes\":65536},\"events_jsonl\":"
             "\"not emitted by storage writer; session diagnostics may provide events.jsonl\","
             "\"power_loss_durability\":false}\n",
         io, &cleanup_close_error, 65536);
 
     log = std::make_unique<Sink>(dir / "terminal.log", io, file_limit,
                                  &cleanup_close_error);
-    log->text("offline_fixture: synthetic acquisition format test\nwriting "
-              "signals.mcap.partial\n");
-    sink = std::make_unique<Sink>(dir / "signals.mcap.partial", io, file_limit,
+    log->text(std::string("capture_source: ") + capture_source_name(source) +
+              "\nwriting signals.mcap.partial\n");
+    sink = std::make_unique<Sink>(dir / "signals.mcap.partial", io, limits.file_bytes,
                                   &cleanup_close_error);
     mcap::McapWriterOptions options("");
     options.library = "lbr-acquisition-offline/0.1.0 mcap/2.1.3";
@@ -364,9 +392,10 @@ struct IncrementalFixtureWriter::Impl {
     writer.addSchema(*state);
     writer.addSchema(*submission);
     mcap::KeyValueMap metadata{{"clock", "host_monotonic"},
-                               {"units", "rad"},
+                               {"position_units", "rad"},
+                               {"torque_units", "Nm"},
                                {"joint_order", "A1,A2,A3,A4,A5,A6,A7"},
-                               {"source", "synthetic"}};
+                               {"source", capture_source_name(source)}};
     sc = std::make_unique<mcap::Channel>("/lbr_acquisition/state",
                                           "protobuf", state->id, metadata);
     cc = std::make_unique<mcap::Channel>("/lbr_acquisition/submission",
@@ -419,10 +448,10 @@ struct IncrementalFixtureWriter::Impl {
       throw;
     }
   }
-  void finish(const std::vector<OfflineEvent> &expected) {
+  void finish(const CaptureSummary &expected) {
     if (failed || finished) throw InvalidInput("fixture writer already closed");
     try {
-      if (expected.size() != validator.count)
+      if (expected.events != validator.count)
         throw InvalidInput("expected event count differs from written count");
       // Lazy MCAP definitions for unused channels are emitted exactly once.
       if (!seen_state) {
@@ -435,9 +464,9 @@ struct IncrementalFixtureWriter::Impl {
       }
       writer.close(); // checked sink close
       opened = false;
-      verify_container(dir / "signals.mcap.partial", expected, descriptor);
-      log->text("native linear CRC and value readback passed\nfinalizing offline "
-                "fixture; timing/sysid not evaluated\n");
+      verify_capture_container(dir / "signals.mcap.partial", expected, descriptor, source, limits);
+      log->text(std::string("native linear CRC and value readback passed\nfinalizing ") +
+                capture_source_name(source) + "; timing/sysid not evaluated\n");
       log->end();
       promote_noreplace(dir / "signals.mcap.partial", dir / "signals.mcap");
       text_file(dir / "quality.json.partial",
@@ -458,13 +487,19 @@ struct IncrementalFixtureWriter::Impl {
 };
 
 IncrementalFixtureWriter::IncrementalFixtureWriter(
-    std::filesystem::path dir, std::filesystem::path desc, FileOps &io)
-    : impl_(std::make_unique<Impl>(std::move(dir), desc, io)) {}
+    std::filesystem::path dir, std::filesystem::path desc, FileOps &io,
+    CaptureSource source, CaptureLimits limits, bool latest_state_only)
+    : impl_(std::make_unique<Impl>(std::move(dir), desc, io, source, limits, latest_state_only)) {}
 IncrementalFixtureWriter::~IncrementalFixtureWriter() = default;
 void IncrementalFixtureWriter::append(const OfflineEvent &e, bool flush) {
   impl_->append(e, flush);
 }
 void IncrementalFixtureWriter::finish(const std::vector<OfflineEvent> &expected) {
+  CaptureSummary summary;
+  for (const auto &event : expected) summary.observe(event);
+  impl_->finish(summary);
+}
+void IncrementalFixtureWriter::finish_capture(const CaptureSummary &expected) {
   impl_->finish(expected);
 }
 const std::filesystem::path &

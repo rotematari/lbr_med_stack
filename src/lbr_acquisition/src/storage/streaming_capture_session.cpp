@@ -91,13 +91,15 @@ StreamingCaptureSession::StreamingCaptureSession(
     std::filesystem::path descriptor, FileOps &io,
     std::chrono::nanoseconds poll_period,
     std::chrono::nanoseconds writer_stall_budget,
-    SessionThreadLauncher *launcher, size_t diagnostic_limit)
-    : config_(config), directory_(std::move(directory)), io_(io),
+    SessionThreadLauncher *launcher, size_t diagnostic_limit,
+    CaptureSource source)
+    : config_(config), source_(source), directory_(std::move(directory)), io_(io),
       poll_ns_(positive_period(poll_period)),
       stall_ns_(positive_period(writer_stall_budget)),
       ledger_capacity_(diagnostic_capacity(diagnostic_limit)),
       launcher_(launcher),
-      recorder_(config), sink_(config.run_id, directory_, std::move(descriptor), io) {
+      recorder_(config), sink_(config.run_id, directory_, std::move(descriptor), io,
+                              source_, capture_limits_for(config.max_events)) {
 }
 StreamingCaptureSession::~StreamingCaptureSession() {
   auto expected = capture::Reason::None;
@@ -261,7 +263,10 @@ void StreamingCaptureSession::publish_diagnostics() {
   std::ostringstream events;
   for (size_t i = 0; i < ledger_count_; ++i) {
     const auto &e = ledger_[i];
-    events << "{\"schema_version\":1,\"source\":\"offline-recorder-session\","
+    events << "{\"schema_version\":1,\"source\":\""
+           << (source_ == CaptureSource::Synthetic ? "offline-recorder-session"
+                                                  : capture_source_name(source_))
+           << "\","
            << "\"capture_run_id\":\"" << config_.run_id << "\","
            << "\"host_monotonic_ns\":\"" << e.at_ns << "\","
            << "\"observed_phase\":\"" << phase_name(e.phase) << "\","
@@ -271,7 +276,10 @@ void StreamingCaptureSession::publish_diagnostics() {
   write_checked(directory_ / "events.jsonl", events.str(), io_);
   const auto core = recorder_.status();
   std::ostringstream log;
-  log << "offline recorder session only; external process stdout/stderr excluded\n"
+  log << (source_ == CaptureSource::Synthetic
+              ? "offline recorder session only; external process stdout/stderr excluded\n"
+              : "FRI SDK recorder session; external process stdout/stderr excluded\n")
+      << "source=" << capture_source_name(source_) << '\n'
       << "capture_run_id=" << config_.run_id << " phase=" << phase_name(core.phase)
       << " reason=" << reason_name(core.reason) << " attempted=" << core.attempted
       << " enqueued=" << core.enqueued << " written=" << core.written

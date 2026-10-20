@@ -30,7 +30,8 @@ public:
                           std::chrono::nanoseconds poll_period,
                           std::chrono::nanoseconds writer_stall_budget,
                           SessionThreadLauncher *launcher = nullptr,
-                          size_t diagnostic_capacity = 32);
+                          size_t diagnostic_capacity = 32,
+                          CaptureSource source = CaptureSource::Synthetic);
   ~StreamingCaptureSession();
   StreamingCaptureSession(const StreamingCaptureSession &) = delete;
   StreamingCaptureSession &operator=(const StreamingCaptureSession &) = delete;
@@ -39,6 +40,7 @@ public:
   bool request_stop(uint64_t run_id,
                     capture::Reason reason = capture::Reason::Manual) noexcept;
   StreamingSessionStatus status() const noexcept;
+  CaptureSource source() const noexcept { return source_; }
   void join();
   static uint64_t now_ns() noexcept;
 private:
@@ -55,6 +57,7 @@ private:
   void join_workers(bool publish) noexcept;
   void publish_diagnostics();
   const capture::Config config_;
+  const CaptureSource source_;
   const std::filesystem::path directory_;
   FileOps &io_;
   const uint64_t poll_ns_, stall_ns_;

@@ -1,5 +1,11 @@
 # 03 - Install the FRI driver on the KUKA controller (Sunrise side)
 
+> For routine operation of the already installed robot, follow the
+> [current AUT/KONI/1 ms startup procedure](05_stationary_fri_startup.md).
+> Installation and historical T1/10 ms examples below are not the current session procedure.
+> Sunrise.OS Med 1.15 and PC SDK 1.15 are verified; the controller FRI option version
+> has not yet been independently identified. Do not infer it solely from the OS label.
+
 Complete, start-to-finish guide for installing the **FRI driver** on the **KUKA LBR Med 7 R800**
 controller so it can be driven from ROS 2. It assumes **no prior familiarity** with the robot or this
 repo. When you finish, the cabinet runs the **LBRServer** application and accepts FRI from the ROS host.
@@ -35,16 +41,20 @@ Linux machine, set up in the other docs (pointers at the end). None of this is n
 - The lab's documented **Med safety profile** and the KUKA **Sunrise.OS Med 1.15** + **Sunrise.FRI 1.15**
   manuals (the authority for safety values and the activation password; see references).
 
-> **Version matching is critical.** The FRI version must match the cabinet OS. This robot ships
-> **Sunrise.OS Med 1.15**, which pairs with **FRI 1.15** (`fri` branch `fri-1.15`, ROS-side
-> `FRI_CLIENT_VERSION=1.15`, and the repo pin in [`lbr_med_stack.repos`](../lbr_med_stack.repos)).
-> If your cabinet shows a different version, see the appendix and use the matching `fri-<major.minor>` branch.
+> **Check the installed components before changing versions.** This robot has
+> **Sunrise.OS Med 1.15**. The verified PC client is **FRI SDK 1.15** (`fri` branch
+> `fri-1.15` and the repo pin in [`lbr_med_stack.repos`](../lbr_med_stack.repos)).
+> The controller FRI option version has not been independently identified. Use the
+> deployed project's option/package information to establish compatibility before
+> upgrading; an OS version label alone is not that verification.
 
 ## Step 1 - Confirm the cabinet's Sunrise.OS / FRI version
 
-Confirm the cabinet OS version before installing, so you clone the matching `fri` branch. It is shown in
-Sunrise Workbench's Station Setup (and on the smartPAD system info). The lab's robot is expected to be
-**Sunrise.OS Med 1.15 -> FRI 1.15**.
+Confirm the cabinet OS and FRI option separately before installing. Inspect the
+deployed Sunrise project's Station Setup software information and supplied FRI
+package. The project's C++ SDK is under `FastRobotInterface_Client_Source`; its
+`include/friClientIf.h` contains a `\version` label. Match the PC SDK to the deployed
+FRI package rather than inferring it solely from the cabinet OS version.
 
 > `[VERIFY ON FIRST RUN]` Read the actual version off this cabinet and use it everywhere `1.15` appears
 > below. If it is not 1.15, do **not** proceed past Step 6 until the ROS-side `FRI_CLIENT_VERSION` and the

@@ -1,0 +1,10 @@
+# PHD-FRI-RECORDER: recorder safety limits, read once when the driver starts.
+# Enabled only when LBR_RECORDING_ROOT is set. Override this file with LBR_RECORDING_CONFIG.
+# Per-run values (requested duration, holds, labels) belong to the experiment configuration.
+
+# Largest max_duration_s a prepare request may ask for (seconds). Watchdog for a missed stop.
+max_duration_cap_s: 300.0
+# Used when a prepare request sends first_sample_timeout_s <= 0 (seconds).
+default_first_sample_timeout_s: 5.0
+# Period of the status poll that advances handoffs and finalizes stopped runs (milliseconds).
+poll_period_ms: 50

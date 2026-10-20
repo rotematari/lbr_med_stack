@@ -8,7 +8,8 @@
 #include <fstream>
 #include <iomanip>
 #include <linux/fs.h>
-#include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <memory>
 #include <sstream>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -16,7 +17,7 @@
 namespace lbr_acquisition {
 namespace {
 namespace fs = std::filesystem;
-constexpr size_t json_limit = 65536, mcap_limit = 16 * 1024 * 1024;
+constexpr size_t json_limit = 65536;
 
 const char *phase_name(capture::Phase p) {
   switch (p) {
@@ -46,7 +47,8 @@ const char *sink_name(OfflineBatchWriter::State s) {
   default: throw InvalidInput("outcome requires terminal sink state");
   }
 }
-template <class Sink> void validate(const Sink &sink, const capture::Status &s) {
+template <class Sink> void validate(const Sink &sink, const capture::Status &s,
+                                         const CaptureSummary &summary) {
   if (!sink.run_id() || !s.writer_done || s.writer_in_call)
     throw InvalidInput("outcome requires quiescent terminal Recorder");
   phase_name(s.phase);
@@ -75,8 +77,8 @@ template <class Sink> void validate(const Sink &sink, const capture::Status &s) 
   if (s.attempted < s.enqueued || s.attempted - s.enqueued != s.rejected ||
       s.enqueued < s.written || s.enqueued - s.written < s.abandoned ||
       s.enqueued - s.written - s.abandoned != s.write_uncertain ||
-      s.enqueued > 10000 || s.written > 10000 ||
-      sink.staged_events().size() != s.written ||
+      s.enqueued > sink.limits().events || s.written > sink.limits().events ||
+      summary.events != s.written ||
       (!s.has_first && (s.first_state_ns || s.last_state_ns)) ||
       (s.has_first && s.last_state_ns < s.first_state_ns))
     throw InvalidInput("inconsistent terminal counters or state clock");
@@ -85,19 +87,11 @@ template <class Sink> void validate(const Sink &sink, const capture::Status &s) 
       throw InvalidInput("finalized sink has unwritten events");
   }
 }
-template <class Sink> void validate_staged_clocks(const Sink &sink,
-                            const capture::Status &s) {
-  bool found = false;
-  uint64_t first = 0, last = 0;
-  for (const auto &e : sink.staged_events()) {
-    if (e.kind != capture::Kind::State) continue;
-    if (!found) first = e.host_monotonic_ns;
-    last = e.host_monotonic_ns;
-    found = true;
-  }
-  if (found != s.has_first ||
-      (found && (first != s.first_state_ns || last != s.last_state_ns)))
-    throw InvalidInput("Recorder State clocks disagree with staged events");
+void validate_staged_clocks(const CaptureSummary &summary, const capture::Status &s) {
+  if ((summary.states != 0) != s.has_first ||
+      (summary.states && (summary.first_state_ns != s.first_state_ns ||
+                          summary.last_state_ns != s.last_state_ns)))
+    throw InvalidInput("Recorder State clocks disagree with acknowledged summary");
 }
 std::string read_bounded(const fs::path &path, size_t limit) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -111,14 +105,6 @@ std::string read_bounded(const fs::path &path, size_t limit) {
   if (!f) throw IoError("artifact read failed");
   return bytes;
 }
-std::string sha256(const std::string &bytes) {
-  unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256(reinterpret_cast<const unsigned char *>(bytes.data()), bytes.size(), hash);
-  std::ostringstream o;
-  for (auto c : hash)
-    o << std::hex << std::setw(2) << std::setfill('0') << unsigned(c);
-  return o.str();
-}
 bool regular_or_absent(const fs::path &p) {
   std::error_code ec;
   auto st = fs::symlink_status(p, ec);
@@ -130,9 +116,31 @@ bool regular_or_absent(const fs::path &p) {
 }
 std::string artifact_json(const fs::path &p, size_t limit) {
   if (!regular_or_absent(p)) return "null";
-  const auto bytes = read_bounded(p, limit);
-  return "{\"size_bytes\":\"" + std::to_string(bytes.size()) +
-         "\",\"sha256\":\"" + sha256(bytes) + "\"}";
+  std::ifstream stream(p, std::ios::binary);
+  if (!stream) throw IoError("cannot read artifact");
+  std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> hash(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+  if (!hash || EVP_DigestInit_ex(hash.get(), EVP_sha256(), nullptr) != 1)
+    throw IoError("artifact digest setup failed");
+  std::array<char, 65536> block{};
+  uint64_t count = 0;
+  while (stream) {
+    stream.read(block.data(), block.size());
+    const auto n = static_cast<uint64_t>(stream.gcount());
+    if (n > limit - count) throw IoError("artifact exceeds profile limit");
+    count += n;
+    if (EVP_DigestUpdate(hash.get(), block.data(), n) != 1)
+      throw IoError("artifact digest update failed");
+  }
+  if (!stream.eof() || stream.bad()) throw IoError("artifact read failed");
+  std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+  unsigned size = 0;
+  if (EVP_DigestFinal_ex(hash.get(), digest.data(), &size) != 1 || size != 32)
+    throw IoError("artifact digest failed");
+  std::ostringstream hex;
+  for (unsigned i = 0; i < size; ++i)
+    hex << std::hex << std::setw(2) << std::setfill('0') << unsigned(digest[i]);
+  return "{\"size_bytes\":\"" + std::to_string(count) +
+         "\",\"sha256\":\"" + hex.str() + "\"}";
 }
 void write_exact(int fd, const std::string &bytes, FileOps &io) {
   const char *p = bytes.data();
@@ -150,7 +158,8 @@ void write_exact(int fd, const std::string &bytes, FileOps &io) {
 
 template <class Sink> void write_capture_outcome_impl(const Sink &sink,
                            const capture::Status &s, FileOps &io) {
-  validate(sink, s);
+  const auto summary = sink.summary();
+  validate(sink, s, summary);
   const auto &dir = sink.output_directory();
   const auto leaf = dir.filename().string();
   if (leaf.empty() || leaf == "." || leaf == "..")
@@ -175,7 +184,7 @@ template <class Sink> void write_capture_outcome_impl(const Sink &sink,
   }
   const auto manifest = artifact_json(dir / "manifest.json", json_limit);
   const auto quality = artifact_json(dir / "quality.json", json_limit);
-  const auto signals = artifact_json(dir / "signals.mcap", mcap_limit);
+  const auto signals = artifact_json(dir / "signals.mcap", sink.limits().file_bytes);
   if (sink.state() == OfflineBatchWriter::State::Finalized &&
       (manifest == "null" || quality == "null" || signals == "null"))
     throw InvalidInput("finalized sink lacks complete artifacts");
@@ -183,16 +192,18 @@ template <class Sink> void write_capture_outcome_impl(const Sink &sink,
   // failed. With no final MCAP, Recorder may have seen a State that the sink
   // never acknowledged, so staged State clocks cannot be compared.
   if (sink.state() == OfflineBatchWriter::State::Finalized || signals != "null")
-    validate_staged_clocks(sink, s);
+    validate_staged_clocks(summary, s);
   if (signals != "null") {
     if (s.enqueued != s.written || s.abandoned || s.write_uncertain)
       throw InvalidInput("final signal file disagrees with Recorder accounting");
     const auto desc = read_bounded(LBR_BUILD_DESCRIPTOR, json_limit);
-    verify_container(dir / "signals.mcap",
-                     encode_capture_batch(sink.staged_events(), sink.run_id()), desc);
+    verify_capture_container(dir / "signals.mcap", summary, desc,
+                             sink.source(), sink.limits());
   }
-  std::string json = "{\"schema_version\":1,\"profile\":\"offline-capture-outcome-v1\","
-                     "\"source\":\"synthetic\",\"capture_run_id\":\"" +
+  std::string json = "{\"schema_version\":1,\"profile\":\"" +
+                     std::string(capture_outcome_profile(sink.source())) +
+                     "\",\"source\":\"" + capture_source_name(sink.source()) +
+                     "\",\"capture_run_id\":\"" +
                      std::to_string(sink.run_id()) + "\",\"phase\":\"" +
                      phase_name(s.phase) + "\",\"reason\":\"" + reason_name(s.reason) +
                      "\",\"failure_flags\":" + std::to_string(s.failure_flags) +

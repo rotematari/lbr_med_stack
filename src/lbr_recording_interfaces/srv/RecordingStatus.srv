@@ -1,0 +1,27 @@
+# Status of the current or most recently retired recording; run_id 0 means "latest".
+uint64 run_id
+---
+uint8 IDLE=0
+uint8 PREPARED=1
+uint8 ARMED=2
+uint8 RECORDING=3
+uint8 STOPPING=4
+uint8 FINALIZED=5
+uint8 CANCELLED=6
+uint8 FAILED=7
+
+# False when the requested run is neither current nor the last retired run.
+bool known
+uint64 run_id
+uint8 phase
+# FINALIZED: capture ended, buffered data written and outcome published.
+bool retired
+bool attached
+bool has_first_sample
+bool source_failed
+uint64 enqueued
+uint64 written
+# Terminal capture reason (e.g. Manual, Duration, NoData, SourceUnavailable), empty while running.
+string reason
+string directory
+string message

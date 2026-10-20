@@ -1,5 +1,8 @@
 # 02 - Network setup (FRI subnet)
 
+> Current installed-robot startup: use [KONI, 192.170.10.1/24 and 1 ms](05_stationary_fri_startup.md),
+> verified on 19 October 2026. The KLI configuration below is retained for installation/history.
+
 Cable the host to the cabinet (directly or through the lab switch) and give the host a static address on the
 FRI subnet. Do this before any real-robot bringup. None of this is needed for mock bringup.
 
@@ -10,12 +13,13 @@ The cabinet exposes two relevant Ethernet ports:
 
 | Port    | Name                                 | Default cabinet IP | Mask                  | Used by this stack |
 | ------- | ------------------------------------ | ------------------ | --------------------- | ------------------ |
-| **X66** | KLI (KUKA Line Interface)            | `172.31.1.147`     | `255.255.0.0` (/16)   | **Yes**            |
-| X69     | KONI (KUKA Option Network Interface) | `192.170.10.2`     | `255.255.255.0` (/24) | No                 |
+| **X66** | KLI (KUKA Line Interface)            | `172.31.1.147`     | `255.255.0.0` (/16)   | Earlier installation setup |
+| Existing KONI connection (socket number not inferred) | KUKA Option Network Interface | `192.170.10.2` | `255.255.255.0` (/24) | **Current 1 ms session** |
 
 
-lbr-stack's documented flow drives FRI over **X66 (KLI)**. We cable into **X66**, not KONI. Revisit only if
-the lab's cabinet turns out to be wired for KONI.
+The older installation flow used **X66 (KLI)**. Rotem confirmed the existing **KONI**
+connection for the current 1 ms session. On the Med cabinet, X69 is KSI service;
+the earlier identification of X69 as KONI was incorrect.
 
 ## Static IP config
 
@@ -65,7 +69,8 @@ the KUKA-correct value and avoids surprises if the cabinet hands out addresses o
 
 - Protocol: **UDP**.
 - Port: **30200** (FRI default).
-- Send period: **10 ms** (matches `FRI_CLIENT_VERSION=1.15`).
+- Send period in this older KLI setup: **10 ms**. The current verified KONI session
+  uses **1 ms**; the SDK version does not itself select the send period.
 
 ## Connectivity checks
 

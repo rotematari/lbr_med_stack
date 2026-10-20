@@ -20,12 +20,20 @@ struct StateMetadata {
   uint32_t control_mode = 0, client_command_mode = 0;
   double reported_sample_period_s = 0;
 };
+enum TorquePresence : uint32_t {
+  MeasuredTorque = 1,
+  CommandedTorque = 2,
+  EstimatedExternalTorque = 4
+};
 struct Event {
   Kind kind = Kind::State;
   uint64_t run_id = 0, id = 0, state_id = 0, host_monotonic_ns = 0;
   std::array<double, 7> position{};
   uint32_t nonfinite_joint_mask = 0;
   StateMetadata metadata{};
+  // State only. A clear bit means unavailable; dormant array values are ignored.
+  uint32_t torque_presence = 0;
+  std::array<double, 7> tau_measured_nm{}, tau_commanded_nm{}, tau_external_estimated_nm{};
 };
 static_assert(std::is_trivially_copyable_v<Event>);
 static_assert(std::is_nothrow_copy_constructible_v<Event>);

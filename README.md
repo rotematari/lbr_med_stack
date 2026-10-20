@@ -58,7 +58,10 @@ Run the go-to-pose example (recommended path is the launch file, which injects t
 and namespaces the node under `/lbr`): see
 [`src/lbr_med_examples/README.md`](src/lbr_med_examples/README.md).
 
-For the real robot, do **not** start here. Work through the network, Sunrise-side, and bringup docs in order:
+For routine startup of the installed robot, use the
+[verified stationary KONI/1 ms procedure](docs/05_stationary_fri_startup.md), confirmed on 19 October 2026.
+For fresh installation, work through the network, Sunrise-side, and bringup docs in order;
+their older KLI settings are not the current stationary-session settings:
 [`docs/02_network_setup.md`](docs/02_network_setup.md) ->
 [`docs/03_sunrise_side_setup.md`](docs/03_sunrise_side_setup.md) ->
 [`docs/04_hardware_bringup_checklist.md`](docs/04_hardware_bringup_checklist.md).

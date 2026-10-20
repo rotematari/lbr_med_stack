@@ -1,0 +1,448 @@
+diff --git a/lbr_bringup/launch/hardware.launch.py b/lbr_bringup/launch/hardware.launch.py
+index 7773dfd..c125dfc 100644
+--- a/lbr_bringup/launch/hardware.launch.py
++++ b/lbr_bringup/launch/hardware.launch.py
+@@ -11,6 +11,13 @@ from launch_ros.substitutions import FindPackageShare
+ 
+ 
+ def generate_launch_description() -> LaunchDescription:
++    # BEGIN PHD-FRI-RECORDER: recording services need LBR_RECORDING_ROOT set before launch,
++    # e.g. `export LBR_RECORDING_ROOT=/abs/path/session-$(date +%Y%m%d-%H%M%S)` (driver built
++    # with LBR_BUILD_RECORDING=ON). Unset: the driver runs normally, logs an ERROR, and the
++    # ~/recording/* services refuse requests with these instructions. Limits:
++    # lbr_fri_ros2/config/recording/limits.yaml, or LBR_RECORDING_CONFIG=<file>.
++    # See packages/lbr-med-stack/src/lbr_acquisition/README.md.
++    # END PHD-FRI-RECORDER
+     return LaunchDescription(
+         [
+             DeclareLaunchArgument(
+diff --git a/lbr_fri_ros2/CMakeLists.txt b/lbr_fri_ros2/CMakeLists.txt
+index 45465a6..6f5b049 100644
+--- a/lbr_fri_ros2/CMakeLists.txt
++++ b/lbr_fri_ros2/CMakeLists.txt
+@@ -62,6 +62,73 @@ target_link_libraries(lbr_fri_ros2
+   FRIClient::FRIClient
+ )
+ 
++# BEGIN PHD-FRI-RECORDER: optional project-owned observation and one offline fixture.
++option(LBR_BUILD_RECORDING "Build the project-owned FRI 1.15 recorder hooks" OFF)
++set(LBR_ACQUISITION_SOURCE_DIR "" CACHE PATH "Project-owned lbr_acquisition source directory")
++if(LBR_BUILD_RECORDING)
++  if(NOT EXISTS "${LBR_ACQUISITION_SOURCE_DIR}/src/fri_adapter.cpp")
++    message(FATAL_ERROR "Set LBR_ACQUISITION_SOURCE_DIR to lbr_acquisition")
++  endif()
++  execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
++    OUTPUT_VARIABLE DRIVER_REV OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
++  set(DRIVER_HASH_INPUT "${DRIVER_REV}\n")
++  foreach(relative CMakeLists.txt include/lbr_fri_ros2/app.hpp src/app.cpp
++      include/lbr_fri_ros2/async_client.hpp src/async_client.cpp
++      include/lbr_fri_ros2/interfaces/base_command.hpp src/interfaces/position_command.cpp)
++    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${relative}")
++    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${relative}" input_hash)
++    string(APPEND DRIVER_HASH_INPUT "${relative}:${input_hash}\n")
++  endforeach()
++  string(SHA256 DRIVER_BUILD_ID "${DRIVER_HASH_INPUT}")
++  set(LBR_DRIVER_BUILD_ID "${DRIVER_REV}; observation_files_sha256=${DRIVER_BUILD_ID}")
++  add_subdirectory("${LBR_ACQUISITION_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/acquisition")
++  # LINK_LIBRARIES preserves ament's existing plain signature and keeps these
++  # implementation-only static libraries out of the exported interface.
++  set_property(TARGET lbr_fri_ros2 APPEND PROPERTY LINK_LIBRARIES acquisition_fri_adapter)
++  target_link_options(lbr_fri_ros2 PRIVATE "LINKER:--exclude-libs,libacquisition_offline.a")
++  target_include_directories(lbr_fri_ros2 PRIVATE "${LBR_ACQUISITION_SOURCE_DIR}/include")
++  target_compile_definitions(lbr_fri_ros2 PRIVATE LBR_FRI_RECORDING)
++  target_compile_features(lbr_fri_ros2 PRIVATE cxx_std_17)
++  # ROS recording services (LBR_RECORDING_ROOT); project-owned sources and limits file.
++  find_package(ament_index_cpp REQUIRED)
++  find_package(lbr_recording_interfaces REQUIRED)
++  find_package(yaml_cpp_vendor REQUIRED)
++  find_package(yaml-cpp REQUIRED)
++  target_sources(lbr_fri_ros2 PRIVATE "${LBR_ACQUISITION_SOURCE_DIR}/ros/src/recording_services.cpp")
++  target_include_directories(lbr_fri_ros2 PRIVATE "${LBR_ACQUISITION_SOURCE_DIR}/ros/include"
++    "${CMAKE_CURRENT_BINARY_DIR}/acquisition/generated")
++  # Private (LINK_LIBRARIES only): not part of the exported lbr_fri_ros2 interface.
++  set_property(TARGET lbr_fri_ros2 APPEND PROPERTY LINK_LIBRARIES
++    ament_index_cpp::ament_index_cpp ${lbr_recording_interfaces_TARGETS} yaml-cpp::yaml-cpp)
++  target_compile_definitions(lbr_fri_ros2 PRIVATE
++    LBR_RECORDING_DESCRIPTOR="${CMAKE_CURRENT_BINARY_DIR}/acquisition/generated/acquisition_v1.desc")
++  install(FILES "${LBR_ACQUISITION_SOURCE_DIR}/ros/config/recording/limits.yaml"
++    DESTINATION share/${PROJECT_NAME}/config/recording)
++  if(BUILD_TESTING)
++    add_executable(test_fri_driver_hooks
++      "${LBR_ACQUISITION_SOURCE_DIR}/test/test_fri_driver_hooks.cpp")
++    target_include_directories(test_fri_driver_hooks PRIVATE "${LBR_ACQUISITION_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/acquisition/generated")
++    target_compile_features(test_fri_driver_hooks PRIVATE cxx_std_17)
++    target_link_libraries(test_fri_driver_hooks lbr_fri_ros2)
++    add_test(NAME fri_driver_hooks COMMAND test_fri_driver_hooks "${CMAKE_CURRENT_BINARY_DIR}/acquisition/generated/acquisition_v1.desc" "${CMAKE_CURRENT_BINARY_DIR}/fri-fixture-output")
++    set_tests_properties(fri_driver_hooks PROPERTIES TIMEOUT 20)
++    add_executable(test_recording_services
++      "${LBR_ACQUISITION_SOURCE_DIR}/ros/test/test_recording_services.cpp")
++    target_include_directories(test_recording_services PRIVATE
++      "${LBR_ACQUISITION_SOURCE_DIR}/include" "${LBR_ACQUISITION_SOURCE_DIR}/ros/include"
++      "${LBR_ACQUISITION_SOURCE_DIR}/test" "${CMAKE_CURRENT_BINARY_DIR}/acquisition/generated")
++    target_compile_features(test_recording_services PRIVATE cxx_std_17)
++    target_link_libraries(test_recording_services lbr_fri_ros2)
++    ament_target_dependencies(test_recording_services rclcpp lbr_recording_interfaces)
++    add_test(NAME recording_services COMMAND test_recording_services
++      "${CMAKE_CURRENT_BINARY_DIR}/acquisition/generated/acquisition_v1.desc"
++      "${CMAKE_CURRENT_BINARY_DIR}/recording-services-output"
++      "${LBR_ACQUISITION_SOURCE_DIR}/ros/config/recording/limits.yaml")
++    set_tests_properties(recording_services PROPERTIES TIMEOUT 60)
++  endif()
++endif()
++# END PHD-FRI-RECORDER
++
+ ament_export_targets(lbr_fri_ros2_export HAS_LIBRARY_TARGET)
+ ament_export_dependencies(
+   eigen3_cmake_module
+diff --git a/lbr_fri_ros2/include/lbr_fri_ros2/app.hpp b/lbr_fri_ros2/include/lbr_fri_ros2/app.hpp
+index a3217a4..e4780aa 100644
+--- a/lbr_fri_ros2/include/lbr_fri_ros2/app.hpp
++++ b/lbr_fri_ros2/include/lbr_fri_ros2/app.hpp
+@@ -15,6 +15,11 @@
+ #include "lbr_fri_ros2/formatting.hpp"
+ #include "lbr_fri_ros2/worker.hpp"
+ 
++// BEGIN PHD-FRI-RECORDER: optional lifecycle owner without an acquisition header dependency.
++namespace lbr_acquisition { class FriRecording; }
++namespace lbr_acquisition_ros { struct RecordingRuntime; class RecordingServices; }
++namespace rclcpp { class Node; }
++// END PHD-FRI-RECORDER
+ namespace lbr_fri_ros2 {
+ class App : public Worker {
+   /**
+@@ -33,13 +38,21 @@ public:
+   void run_async(int rt_prio = 80) override;
+ 
+   inline std::string LOGGER_NAME() const override { return "lbr_fri_ros2::App"; };
++  // BEGIN PHD-FRI-RECORDER: recording services on the hardware node; no-op without recording.
++  void attach_recording_services(const std::shared_ptr<rclcpp::Node> &node);
++  // END PHD-FRI-RECORDER
+ 
+ protected:
+   void perform_work_() override;
+   bool valid_port_(const int &port_id);
+ 
+   std::shared_ptr<AsyncClient> async_client_ptr_;
+-  std::unique_ptr<KUKA::FRI::UdpConnection> connection_ptr_;
++  // BEGIN PHD-FRI-RECORDER: public SDK seam permits an observation wrapper.
++  std::shared_ptr<lbr_acquisition::FriRecording> recording_;
++  std::shared_ptr<lbr_acquisition_ros::RecordingRuntime> recording_runtime_;
++  std::shared_ptr<lbr_acquisition_ros::RecordingServices> recording_services_;
++  std::unique_ptr<KUKA::FRI::IConnection> connection_ptr_;
++  // END PHD-FRI-RECORDER
+   std::unique_ptr<KUKA::FRI::ClientApplication> app_ptr_;
+ };
+ } // namespace lbr_fri_ros2
+diff --git a/lbr_fri_ros2/include/lbr_fri_ros2/async_client.hpp b/lbr_fri_ros2/include/lbr_fri_ros2/async_client.hpp
+index b90d449..a322b7a 100644
+--- a/lbr_fri_ros2/include/lbr_fri_ros2/async_client.hpp
++++ b/lbr_fri_ros2/include/lbr_fri_ros2/async_client.hpp
+@@ -20,6 +20,10 @@
+ #include "lbr_fri_ros2/interfaces/torque_command.hpp"
+ #include "lbr_fri_ros2/interfaces/wrench_command.hpp"
+ 
++// BEGIN PHD-FRI-RECORDER: optional project-owned observer, installed before FRI starts.
++namespace lbr_acquisition { class RecorderAdapter; }
++// END PHD-FRI-RECORDER
++
+ namespace lbr_fri_ros2 {
+ class AsyncClient : public KUKA::FRI::LBRClient {
+ protected:
+@@ -40,6 +44,10 @@ public:
+   }
+   inline std::shared_ptr<StateInterface> get_state_interface() { return state_interface_ptr_; }
+ 
++  // BEGIN PHD-FRI-RECORDER: setup-only attachment (never replace during callbacks).
++  void set_recorder(std::shared_ptr<lbr_acquisition::RecorderAdapter> recorder);
++  // END PHD-FRI-RECORDER
++
+   void onStateChange(KUKA::FRI::ESessionState old_state,
+                      KUKA::FRI::ESessionState new_state) override;
+   void monitor() override;
+@@ -50,6 +58,9 @@ protected:
+   void on_enter_commanding_active_();
+ 
+ protected:
++  // BEGIN PHD-FRI-RECORDER: stable observer lifetime; no shared-pointer copies in callbacks.
++  std::shared_ptr<lbr_acquisition::RecorderAdapter> recorder_;
++  // END PHD-FRI-RECORDER
+   std::shared_ptr<BaseCommandInterface> command_interface_ptr_;
+   std::shared_ptr<StateInterface> state_interface_ptr_;
+ 
+diff --git a/lbr_fri_ros2/include/lbr_fri_ros2/interfaces/base_command.hpp b/lbr_fri_ros2/include/lbr_fri_ros2/interfaces/base_command.hpp
+index 4205277..2512e9c 100644
+--- a/lbr_fri_ros2/include/lbr_fri_ros2/interfaces/base_command.hpp
++++ b/lbr_fri_ros2/include/lbr_fri_ros2/interfaces/base_command.hpp
+@@ -18,6 +18,10 @@
+ #include "lbr_fri_ros2/guards/command_guard.hpp"
+ #include "lbr_fri_ros2/types.hpp"
+ 
++// BEGIN PHD-FRI-RECORDER: project-owned optional observer, no SDK header changes.
++namespace lbr_acquisition { class RecorderAdapter; }
++// END PHD-FRI-RECORDER
++
+ namespace lbr_fri_ros2 {
+ class BaseCommandInterface {
+ protected:
+@@ -36,6 +40,12 @@ public:
+   }
+   void init_command(const_idl_state_t_ref state);
+ 
++  // BEGIN PHD-FRI-RECORDER: setup-only; owner must not replace during callbacks.
++  void set_recorder(std::shared_ptr<lbr_acquisition::RecorderAdapter> recorder) {
++    recorder_ = std::move(recorder);
++  }
++  // END PHD-FRI-RECORDER
++
+   idl_command_t get_command() const {
+     std::lock_guard<std::mutex> lock(command_mutex_);
+     return command_;
+@@ -48,6 +58,9 @@ protected:
+ 
+ protected:
+   mutable std::mutex command_mutex_;
++  // BEGIN PHD-FRI-RECORDER: retains observer until command callbacks have stopped.
++  std::shared_ptr<lbr_acquisition::RecorderAdapter> recorder_;
++  // END PHD-FRI-RECORDER
+   bool command_initialized_;
+   std::unique_ptr<CommandGuard> command_guard_;
+   ExponentialFilterArray<N_JNTS> joint_position_filter_;
+diff --git a/lbr_fri_ros2/package.xml b/lbr_fri_ros2/package.xml
+index 2cdfce1..292bb01 100644
+--- a/lbr_fri_ros2/package.xml
++++ b/lbr_fri_ros2/package.xml
+@@ -21,6 +21,11 @@
+   <depend>rclcpp</depend>
+   <depend>realtime_tools</depend>
+   <depend>urdf</depend>
++  <!-- BEGIN PHD-FRI-RECORDER: recording services (used only with LBR_BUILD_RECORDING=ON). -->
++  <depend>ament_index_cpp</depend>
++  <depend>lbr_recording_interfaces</depend>
++  <depend>yaml_cpp_vendor</depend>
++  <!-- END PHD-FRI-RECORDER -->
+ 
+   <exec_depend>lbr_description</exec_depend>
+ 
+diff --git a/lbr_fri_ros2/src/app.cpp b/lbr_fri_ros2/src/app.cpp
+index 9be75fe..ffc7653 100644
+--- a/lbr_fri_ros2/src/app.cpp
++++ b/lbr_fri_ros2/src/app.cpp
+@@ -1,16 +1,59 @@
+ #include "lbr_fri_ros2/app.hpp"
++// BEGIN PHD-FRI-RECORDER: setup and worker lifetime are outside FRI callbacks.
++#include <cstdlib>
++#include <stdexcept>
++#ifdef LBR_FRI_RECORDING
++#include "ament_index_cpp/get_package_share_directory.hpp"
++#include "lbr_acquisition/fri_adapter.hpp"
++#include "lbr_acquisition_ros/recording_services.hpp"
++#endif
++// END PHD-FRI-RECORDER
+ 
+ namespace lbr_fri_ros2 {
+ App::App(const std::shared_ptr<AsyncClient> async_client_ptr)
+     : async_client_ptr_(nullptr), connection_ptr_(nullptr), app_ptr_(nullptr) {
+   async_client_ptr_ = async_client_ptr;
+   connection_ptr_ = std::make_unique<KUKA::FRI::UdpConnection>();
++  // BEGIN PHD-FRI-RECORDER: explicit opt-in prepares files before any socket opens.
++#ifdef LBR_FRI_RECORDING
++  // LBR_RECORDING_ROOT: numbered runs via ROS services (one stable adapter, installed once).
++  recording_runtime_ = lbr_acquisition_ros::runtime_from_environment(LBR_RECORDING_DESCRIPTOR, [] {
++    return std::filesystem::path(ament_index_cpp::get_package_share_directory("lbr_fri_ros2")) /
++           "config/recording/limits.yaml";
++  });
++  if (recording_runtime_->manager) {
++    const auto adapter = recording_runtime_->manager->adapter();
++    async_client_ptr_->set_recorder(adapter);
++    connection_ptr_ =
++        std::make_unique<lbr_acquisition::ObservedConnection>(std::move(connection_ptr_), adapter);
++  }
++  // LBR_RECORDING_DIRECTORY: existing one-shot recording (exclusive with the above).
++  recording_ = lbr_acquisition::FriRecording::from_environment();
++  if (recording_) {
++    async_client_ptr_->set_recorder(recording_->adapter());
++    connection_ptr_ = std::make_unique<lbr_acquisition::ObservedConnection>(
++        std::move(connection_ptr_), recording_->adapter());
++  }
++#else
++  if (std::getenv("LBR_RECORDING_DIRECTORY") || std::getenv("LBR_RECORDING_ROOT"))
++    throw std::runtime_error("LBR_RECORDING_DIRECTORY/LBR_RECORDING_ROOT require LBR_BUILD_RECORDING=ON");
++#endif
++  // END PHD-FRI-RECORDER
+   app_ptr_ = std::make_unique<KUKA::FRI::ClientApplication>(*connection_ptr_, *async_client_ptr_);
+ }
+ 
+ App::~App() {
+   request_stop();
+   close_udp_socket();
++  // BEGIN PHD-FRI-RECORDER: storage cleanup follows the original control shutdown.
++  // A hung writer must never delay the driver's stop request or socket closure.
++#ifdef LBR_FRI_RECORDING
++  if (recording_) { recording_->source_stopped(); recording_->wait(); }
++  // Services stop issuing callbacks; the manager lives while the run thread or a
++  // running callback still holds the runtime.
++  recording_services_.reset();
++#endif
++  // END PHD-FRI-RECORDER
+ }
+ 
+ bool App::open_udp_socket(const int &port_id, const char *const remote_host) {
+@@ -29,6 +72,14 @@ bool App::open_udp_socket(const int &port_id, const char *const remote_host) {
+     RCLCPP_INFO(rclcpp::get_logger(LOGGER_NAME()), "Socket already open");
+     return true;
+   }
++  // BEGIN PHD-FRI-RECORDER: worker startup failure prevents an explicit recording launch.
++#ifdef LBR_FRI_RECORDING
++  if (recording_ && !recording_->start()) {
++    RCLCPP_ERROR(rclcpp::get_logger(LOGGER_NAME()), "Recorder startup failed; socket not opened");
++    return false;
++  }
++#endif
++  // END PHD-FRI-RECORDER
+   if (!connection_ptr_->open(port_id, remote_host)) {
+     RCLCPP_ERROR_STREAM(rclcpp::get_logger(LOGGER_NAME()),
+                         ColorScheme::ERROR << "Failed to open socket" << ColorScheme::ENDC);
+@@ -89,6 +140,10 @@ void App::run_async(int rt_prio) {
+ }
+ 
+ void App::perform_work_() {
++  // BEGIN PHD-FRI-RECORDER: retain lifecycle ownership until this source exits.
++  const auto recording = recording_;
++  const auto recording_runtime = recording_runtime_;
++  // END PHD-FRI-RECORDER
+   bool success = true;
+   while (rclcpp::ok() && success && !should_stop_) {
+     success = app_ptr_->step(); // stuck if never connected, we thus detach the run_thread_ as join
+@@ -99,9 +154,30 @@ void App::perform_work_() {
+       break;
+     }
+   }
++  // BEGIN PHD-FRI-RECORDER: atomic notification; no writer join on the FRI thread.
++#ifdef LBR_FRI_RECORDING
++  if (recording) recording->source_stopped();
++  if (recording_runtime && recording_runtime->manager) {
++    recording_runtime->manager->adapter()->source_stopped();
++    recording_runtime->producer_exited.store(true); // No hook call follows this point.
++  }
++#endif
++  // END PHD-FRI-RECORDER
+   async_client_ptr_->get_state_interface()->uninitialize();
+ }
+ 
++// BEGIN PHD-FRI-RECORDER: services exist in every recording build so clients get a reason.
++void App::attach_recording_services(const std::shared_ptr<rclcpp::Node> &node) {
++#ifdef LBR_FRI_RECORDING
++  if (node && recording_runtime_ && !recording_services_)
++    recording_services_ =
++        std::make_shared<lbr_acquisition_ros::RecordingServices>(node, recording_runtime_);
++#else
++  (void)node;
++#endif
++}
++// END PHD-FRI-RECORDER
++
+ bool App::valid_port_(const int &port_id) {
+   if (port_id < 30200 || port_id > 30209) {
+     RCLCPP_ERROR_STREAM(rclcpp::get_logger(LOGGER_NAME()),
+diff --git a/lbr_fri_ros2/src/async_client.cpp b/lbr_fri_ros2/src/async_client.cpp
+index 954c5a3..392ccb7 100644
+--- a/lbr_fri_ros2/src/async_client.cpp
++++ b/lbr_fri_ros2/src/async_client.cpp
+@@ -1,5 +1,11 @@
+ #include "lbr_fri_ros2/async_client.hpp"
+ 
++// BEGIN PHD-FRI-RECORDER: optional project-owned implementation dependency.
++#ifdef LBR_FRI_RECORDING
++#include "lbr_acquisition/fri_adapter.hpp"
++#endif
++// END PHD-FRI-RECORDER
++
+ namespace lbr_fri_ros2 {
+ AsyncClient::AsyncClient(const KUKA::FRI::EClientCommandMode &client_command_mode,
+                          const double &joint_position_tau,
+@@ -80,9 +86,31 @@ void AsyncClient::onStateChange(KUKA::FRI::ESessionState old_state,
+   }
+ }
+ 
+-void AsyncClient::monitor() { state_interface_ptr_->set_state(robotState()); };
++// BEGIN PHD-FRI-RECORDER: configure before FRI starts; disabled builds reject attachment.
++void AsyncClient::set_recorder(std::shared_ptr<lbr_acquisition::RecorderAdapter> recorder) {
++#ifndef LBR_FRI_RECORDING
++  if (recorder) throw std::logic_error("FRI recording support was not built");
++#endif
++  recorder_ = std::move(recorder);
++  command_interface_ptr_->set_recorder(recorder_);
++}
++// END PHD-FRI-RECORDER
++
++void AsyncClient::monitor() {
++  // BEGIN PHD-FRI-RECORDER: observe decoded raw state before StateInterface processing.
++#ifdef LBR_FRI_RECORDING
++  if (recorder_) recorder_->on_state(robotState());
++#endif
++  // END PHD-FRI-RECORDER
++  state_interface_ptr_->set_state(robotState());
++};
+ 
+ void AsyncClient::waitForCommand() {
++  // BEGIN PHD-FRI-RECORDER: one state observation per SDK phase callback.
++#ifdef LBR_FRI_RECORDING
++  if (recorder_) recorder_->on_state(robotState());
++#endif
++  // END PHD-FRI-RECORDER
+   KUKA::FRI::LBRClient::waitForCommand();
+   state_interface_ptr_->set_state(robotState());
+   command_interface_ptr_->init_command(state_interface_ptr_->get_state());
+@@ -91,6 +119,11 @@ void AsyncClient::waitForCommand() {
+ }
+ 
+ void AsyncClient::command() {
++  // BEGIN PHD-FRI-RECORDER: raw actual q and torques, before open-loop substitution/filtering.
++#ifdef LBR_FRI_RECORDING
++  if (recorder_) recorder_->on_state(robotState());
++#endif
++  // END PHD-FRI-RECORDER
+   if (open_loop_) {
+     state_interface_ptr_->set_state_open_loop(robotState(),
+                                               command_interface_ptr_->get_command().joint_position);
+diff --git a/lbr_fri_ros2/src/interfaces/position_command.cpp b/lbr_fri_ros2/src/interfaces/position_command.cpp
+index d476da4..fad4e70 100644
+--- a/lbr_fri_ros2/src/interfaces/position_command.cpp
++++ b/lbr_fri_ros2/src/interfaces/position_command.cpp
+@@ -1,5 +1,11 @@
+ #include "lbr_fri_ros2/interfaces/position_command.hpp"
+ 
++// BEGIN PHD-FRI-RECORDER: optional project-owned implementation dependency.
++#ifdef LBR_FRI_RECORDING
++#include "lbr_acquisition/fri_adapter.hpp"
++#endif
++// END PHD-FRI-RECORDER
++
+ namespace lbr_fri_ros2 {
+ PositionCommandInterface::PositionCommandInterface(
+     const double &joint_position_tau, const CommandGuardParameters &command_guard_parameters,
+@@ -76,5 +82,10 @@ void PositionCommandInterface::buffered_command_to_fri(fri_command_t_ref command
+ 
+   // write joint position to output
+   command.setJointPosition(command_.joint_position.data());
++  // BEGIN PHD-FRI-RECORDER: exact successful SDK submission, after existing filter/guard.
++#ifdef LBR_FRI_RECORDING
++  if (recorder_) recorder_->on_submission(command_.joint_position.data());
++#endif
++  // END PHD-FRI-RECORDER
+ }
+ } // namespace lbr_fri_ros2
+diff --git a/lbr_ros2_control/src/system_interface.cpp b/lbr_ros2_control/src/system_interface.cpp
+index c1bd5f9..fa04675 100644
+--- a/lbr_ros2_control/src/system_interface.cpp
++++ b/lbr_ros2_control/src/system_interface.cpp
+@@ -48,6 +48,9 @@ SystemInterface::on_init(const hardware_interface::HardwareComponentInterfacePar
+         parameters_.command_guard_variant, state_guard_parameters, state_interface_parameters,
+         parameters_.open_loop);
+     app_ptr_ = std::make_unique<lbr_fri_ros2::App>(async_client_ptr_);
++    // BEGIN PHD-FRI-RECORDER: LBR_RECORDING_ROOT recording services; no-op otherwise.
++    app_ptr_->attach_recording_services(get_node());
++    // END PHD-FRI-RECORDER
+   } catch (const std::exception &e) {
+     RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                         lbr_fri_ros2::ColorScheme::ERROR

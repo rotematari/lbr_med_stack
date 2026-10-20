@@ -19,7 +19,7 @@ struct ActiveScope {
 } // namespace
 Config Recorder::validate(Config c) {
   if (!c.run_id || !c.duration_ns || !c.first_sample_timeout_ns ||
-      !c.max_events || c.max_events > 10000 || !c.queue_capacity ||
+      !c.max_events || !c.queue_capacity ||
       c.queue_capacity > 10000)
     throw std::invalid_argument("invalid offline recorder limits");
   return c;
@@ -126,9 +126,11 @@ Offer Recorder::offer(const Event &e, bool eligible) noexcept {
     if (!std::isfinite(e.position[i])) nonfinite_mask |= uint32_t{1} << i;
   constexpr uint32_t known_metadata = ControllerTime | SamplePeriod | Session |
                                       Quality | Control | Command;
+  constexpr uint32_t known_torques = MeasuredTorque | CommandedTorque | EstimatedExternalTorque;
   const bool valid_payload = nonfinite_mask == e.nonfinite_joint_mask &&
       !(e.metadata.presence & ~known_metadata) &&
-      (e.kind != Kind::Submission || !e.metadata.presence);
+      !(e.torque_presence & ~known_torques) &&
+      (e.kind != Kind::Submission || (!e.metadata.presence && !e.torque_presence));
   if ((!valid_state && !valid_submission) || !valid_payload) {
     rejected_.fetch_add(1);
     close(Reason::InvalidEvent);

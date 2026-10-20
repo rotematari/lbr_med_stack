@@ -57,8 +57,15 @@ void owns_records_and_reports_overflow() {
   auto e = state(1, 110);
   e.metadata.presence = 63;
   e.metadata.controller_sec = 123;
+  e.torque_presence = MeasuredTorque | CommandedTorque | EstimatedExternalTorque;
+  e.tau_measured_nm = {1.25, -0., -2.5, 3.75, -5., 6.25, -7.5};
+  e.tau_commanded_nm.fill(2.5);
+  e.tau_external_estimated_nm.fill(-.25);
   assert(r.offer(e) == Offer::Accepted);
   e.position.fill(99);
+  e.tau_measured_nm.fill(99);
+  e.tau_commanded_nm.fill(99);
+  e.tau_external_estimated_nm.fill(99);
   e.metadata.controller_sec = 999;
   assert(r.offer(submission(1, 1, 111)) == Offer::Accepted);
   assert(r.offer(state(2, 112)) == Offer::Rejected);
@@ -70,6 +77,11 @@ void owns_records_and_reports_overflow() {
   assert(sink.events.size() == 2 && sink.events[0].position[0] == .125);
   assert(std::signbit(sink.events[0].position[1]));
   assert(sink.events[0].metadata.controller_sec == 123);
+  assert(sink.events[0].torque_presence == 7);
+  assert(sink.events[0].tau_measured_nm[0] == 1.25 &&
+         std::signbit(sink.events[0].tau_measured_nm[1]));
+  assert(sink.events[0].tau_commanded_nm[6] == 2.5);
+  assert(sink.events[0].tau_external_estimated_nm[6] == -.25);
   assert(sink.events[1].position[0] == .5 && sink.events[1].state_id == 1);
   assert(sink.finishes == 1 && !r.writer_step(sink));
 }
@@ -261,7 +273,7 @@ void invalid_configuration() {
     if (i == 2)
       c.first_sample_timeout_ns = 0;
     if (i == 3)
-      c.max_events = 10001;
+      c.max_events = 0;
     if (i == 4)
       c.queue_capacity = 0;
     if (i == 5)
@@ -276,7 +288,7 @@ void invalid_configuration() {
   }
 }
 void malformed_payload_is_rejected_before_the_writer() {
-  for (unsigned fault = 0; fault < 4; ++fault) {
+  for (unsigned fault = 0; fault < 6; ++fault) {
     Recorder r(config());
     Sink sink;
     assert(r.start(7, 100));
@@ -289,15 +301,37 @@ void malformed_payload_is_rejected_before_the_writer() {
       e = submission(1, 1, 102);
       e.metadata.presence = ControllerTime;
     }
+    if (fault == 4) e.torque_presence = 8;
+    if (fault == 5) {
+      assert(r.offer(e) == Offer::Accepted);
+      e = submission(1, 1, 102);
+      e.torque_presence = MeasuredTorque;
+    }
     assert(r.offer(e) == Offer::Rejected);
     drain(r, sink);
     const auto s = r.status();
     assert(s.reason == Reason::InvalidEvent && s.rejected == 1);
     assert(s.write_uncertain == 0 && s.abandoned == 0);
-    assert(s.written == (fault == 3 ? 1 : 0));
+    assert(s.written == (fault == 3 || fault == 5 ? 1 : 0));
   }
 }
+void ten_second_capture_uses_configured_event_budget() {
+  Recorder r({7, 10000000000ULL, 50, 24096, 4});
+  Sink sink;
+  assert(r.start(7, 100));
+  for (uint64_t i = 1; i <= 10000; ++i) {
+    const auto t = 110 + (i - 1) * 1000000;
+    assert(r.offer(state(i, t)) == Offer::Accepted);
+    assert(r.offer(submission(i, i, t + 100)) == Offer::Accepted);
+    while (r.writer_step(sink)) {}
+  }
+  r.tick(10000000110ULL);
+  drain(r, sink);
+  assert(r.status().reason == Reason::Duration);
+  assert(r.status().written == 20000 && r.status().rejected == 0);
+}
 int main() {
+  ten_second_capture_uses_configured_event_budget();
   malformed_payload_is_rejected_before_the_writer();
   owns_records_and_reports_overflow();
   duration_is_first_state_and_duplicate_start_does_not_extend_it();

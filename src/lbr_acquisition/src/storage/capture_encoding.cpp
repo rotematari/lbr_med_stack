@@ -16,6 +16,10 @@ OfflineEvent encode_capture_event(const capture::Event &e,
                                capture::Control | capture::Command;
     if (m.presence & ~known)
       throw InvalidInput("unsupported capture metadata presence");
+    constexpr uint32_t known_torques = capture::MeasuredTorque | capture::CommandedTorque |
+                                       capture::EstimatedExternalTorque;
+    if (e.torque_presence & ~known_torques)
+      throw InvalidInput("unsupported torque presence");
     if (e.kind == capture::Kind::State) {
       if (e.state_id != e.id)
         throw InvalidInput("capture State identity mismatch");
@@ -26,6 +30,12 @@ OfflineEvent encode_capture_event(const capture::Event &e,
       s.set_nonfinite_joint_mask(e.nonfinite_joint_mask);
       for (double q : e.position)
         s.add_q_measured_rad(q);
+      if (e.torque_presence & capture::MeasuredTorque)
+        for (double tau : e.tau_measured_nm) s.add_tau_measured_nm(tau);
+      if (e.torque_presence & capture::CommandedTorque)
+        for (double tau : e.tau_commanded_nm) s.add_tau_commanded_nm(tau);
+      if (e.torque_presence & capture::EstimatedExternalTorque)
+        for (double tau : e.tau_external_estimated_nm) s.add_tau_external_estimated_nm(tau);
       if (m.presence & capture::ControllerTime) {
         s.set_controller_sec(m.controller_sec);
         s.set_controller_nsec(m.controller_nsec);
@@ -42,7 +52,7 @@ OfflineEvent encode_capture_event(const capture::Event &e,
         s.set_client_command_mode(m.client_command_mode);
       return s;
     } else if (e.kind == capture::Kind::Submission) {
-      if (m.presence || !latest_state || e.state_id != latest_state)
+      if (m.presence || e.torque_presence || !latest_state || e.state_id != latest_state)
         throw InvalidInput(
             "invalid capture Submission metadata or association");
       lbr::acquisition::v1::Submission s;

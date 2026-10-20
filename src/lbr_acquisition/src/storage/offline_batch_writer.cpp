@@ -3,6 +3,15 @@
 #include <utility>
 
 namespace lbr_acquisition {
+CaptureSummary OfflineBatchWriter::summary() const {
+  CaptureSummary result;
+  uint64_t latest_state = 0;
+  for (const auto &event : events_) {
+    result.observe(encode_capture_event(event, run_id_, latest_state));
+    if (event.kind == capture::Kind::State) latest_state = event.id;
+  }
+  return result;
+}
 OfflineBatchWriter::OfflineBatchWriter(uint64_t run_id,
                                        std::filesystem::path directory,
                                        std::filesystem::path descriptor,

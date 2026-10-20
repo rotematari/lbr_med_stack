@@ -1,0 +1,8 @@
+# Start or stop the recording with this ID (service name selects the command).
+uint64 run_id
+---
+# Start: accepted for attachment; poll status until phase is RECORDING.
+# Stop: the request was recognized; poll status until retired is true. The final phase is
+# FINALIZED or FAILED, or CANCELLED for a prepared run that was never started.
+bool accepted
+string message

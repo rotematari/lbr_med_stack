@@ -16,3 +16,7 @@ graphify-out/
 # First-party offline acquisition package
 !src/lbr_acquisition/
 !src/lbr_acquisition/**
+
+# First-party recording control interfaces
+!src/lbr_recording_interfaces/
+!src/lbr_recording_interfaces/**

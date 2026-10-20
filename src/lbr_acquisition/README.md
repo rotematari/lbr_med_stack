@@ -4,8 +4,191 @@ Milestone 1: write synthetic joint-position states and submitted positions to
 MCAP/Protobuf, then check them with an independent native reader and the project
 Python reader. This executable has no ROS or FRI dependency and does not connect
 to hardware. Milestone 2A adds the bounded queue/lifecycle core described below;
-2B.4 adds an offline streaming session. Torque acquisition and live FRI
-integration remain later steps.
+2B.4 adds an offline streaming session. The 18 October format increment adds
+three distinct joint-torque signals to the baseline. These standalone fixtures
+exercise synthetic values. The optional driver adapter subsequently completed a
+one-second live stationary capture on 19 October, followed by a ten-second
+stationary capture with the configurable-duration, bounded-memory extension.
+
+## Recording services in the live driver — 20 October 2026
+
+Numbered recordings on one FRI connection, controlled through ROS services while
+the robot stays under its normal position controller. **Opt-in, set before launch:**
+
+```bash
+export LBR_RECORDING_ROOT=/abs/path/session-$(date +%Y%m%d-%H%M%S)  # required
+export LBR_RECORDING_CONFIG=/abs/path/limits.yaml                   # optional override
+```
+
+Runs are saved to `<LBR_RECORDING_ROOT>/run-<run_id>/` with `request.yaml` (label,
+requested limits). `LBR_RECORDING_ROOT` and the one-shot `LBR_RECORDING_DIRECTORY`
+are mutually exclusive. When `LBR_RECORDING_ROOT` is unset in a recording build, the
+driver runs normally, logs an ERROR with these instructions, and every service refuses
+with the same message. Builds without `LBR_BUILD_RECORDING=ON` reject both variables.
+
+**Limits** come from `config/recording/limits.yaml`, installed to
+`share/lbr_fri_ros2/config/recording/` (source: `ros/config/recording/limits.yaml`).
+Unknown keys or invalid values stop the driver at startup.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `max_duration_cap_s` | 300 | Largest per-run `max_duration_s` (watchdog for a missed stop). |
+| `default_first_sample_timeout_s` | 5 | Used when a request sends `first_sample_timeout_s <= 0`. |
+| `poll_period_ms` | 50 | Timer that advances handoffs and finalizes stopped runs. |
+
+**Services** (package `lbr_recording_interfaces`) on the hardware component node,
+expected at `/lbr/lbr_system_interface/recording/{prepare,start,stop,status}`;
+confirm with `ros2 service list | grep recording`.
+
+```bash
+srv=/lbr/lbr_system_interface/recording
+ros2 service call $srv/prepare lbr_recording_interfaces/srv/PrepareRecording "{run_id: 1, max_duration_s: 30.0, label: 'stationary'}"
+ros2 service call $srv/start   lbr_recording_interfaces/srv/RecordingCommand "{run_id: 1}"
+ros2 service call $srv/status  lbr_recording_interfaces/srv/RecordingStatus  "{run_id: 1}"   # until phase 3 (RECORDING)
+ros2 service call $srv/stop    lbr_recording_interfaces/srv/RecordingCommand "{run_id: 1}"
+ros2 service call $srv/status  lbr_recording_interfaces/srv/RecordingStatus  "{run_id: 1}"   # until phase 5 (FINALIZED)
+```
+
+The client chooses strictly increasing `run_id`s. `prepare` accepted means files
+and buffers are ready; status RECORDING means the first valid sample was captured;
+FINALIZED means capture ended, data was written and the outcome published. Runs
+finalize automatically after stop or the watchdog. A failed run, source loss or
+driver deactivation blocks further runs until the driver restarts. Requests are
+served by one callback group (the manager's single owner); the default services
+QoS queue keeps 10 pending requests per service, so do not flood it.
+
+Offline verification: a services test runs the real driver client over the
+in-memory connection while a multithreaded executor serves the services: two
+Manual runs on one adapter, stale/duplicate/cap/label/existing-output rejections,
+cancellation, concurrent status requests, producer exit while recording, disabled
+mode and limits/environment validation. Python readback of the service-recorded
+runs verifies all five signal groups. ASan/UBSan clean (leak checking off: rclcpp
+shutdown). No live run yet.
+
+## Reusable recording manager — 19 October 2026
+
+`FriRecordingManager` records several runs, one after another, on one FRI
+connection. Its `adapter()` is installed once (in `ObservedConnection` and
+`AsyncClient::set_recorder`) and never replaced. Each run is a fresh single-use
+`FriRecording`; the manager owns at most one run plus one compact last result.
+
+```text
+prepare(config, new_dir, descriptor) -> start(id) -> [first State] -> request_stop(id)
+  -> poll() until detached and workers joined -> finish(id) -> next prepare(...)
+```
+
+Routing changes only at the start of an FRI cycle. `start()` and stop publish one
+request in a single-slot mailbox; the FRI thread picks it up in `reset_packet()`
+at the next receive entry and acknowledges it. The manager releases a run only
+after the FRI thread has acknowledged detachment, or after `producer_stopped()`
+confirms that no further callbacks can occur. A timeout or closed socket is not
+that confirmation. Routed hooks perform no allocation, locks, waits or file work;
+the routing atomics are checked lock-free at compile time.
+
+Status meanings:
+
+| Field | Meaning |
+|---|---|
+| `Armed` | Started; first eligible State not yet admitted. |
+| `Recording` | The recorder accepted its first eligible State. |
+| `Stopping` | Admission closed (Manual, duration or fault); detachment/drain pending. |
+| `detached` | The FRI thread acknowledged detach, or the producer is confirmed stopped. |
+| `finish()` true | The run is retired. Check `phase`/`session` for its quality. |
+| `Finalized` | Complete, non-empty, fault-free capture with published outcome. |
+| `Cancelled` | Prepared run stopped before start; another run may follow. |
+| `Failed` | Empty, faulted or unpublished run. Blocks further runs; no retry. |
+
+`Finalized`/`Failed` come only from the run's own outcome. Source loss after an
+earlier Manual or duration stop does not change that first cause, so a complete
+run stays `Finalized` even if FRI closes before the detach cycle; no new run may
+start after source loss or `producer_stopped()`.
+
+All manager methods belong to one non-FRI owner thread, which must call `poll()`
+regularly. Only `RecorderAdapter::source_stopped()` may come from another thread.
+Run IDs must be nonzero and strictly increasing; output directories must be new.
+Source loss blocks new runs. Destroying the manager requires a quiescent producer.
+The manager is not yet installed in the live driver App and has no ROS interface.
+
+Offline verification extends the in-memory real-driver fixture with A, idle, then
+B on one connection; automatic duration; ten repeated Manual runs; stop between a
+routed State and Submission with zero routed-hook allocations; stop before attach;
+worker completion before detach acknowledgement; shutdown while Prepared, Armed,
+Recording and Stopping; a complete Manual run finished after confirmed producer
+end; source loss, no data, invalid data and failed outcome publication; stale,
+duplicate and reused IDs/directories. Allocation checks cover all four routed hooks. Outgoing command bytes
+match recording disabled. Two deliberate mutations of the handoff are each caught.
+The fixture also passes under ASan/UBSan; ThreadSanitizer is unavailable on this
+host. Python readback of all successful manager bundles verifies all five signal
+groups, state associations and disjoint A/B events. No hardware or real-time
+qualification is claimed.
+
+## Explicit stop on the FRI recording object — 19 October 2026
+
+The optional project-owned `FriRecording` now exposes
+`bool request_stop(uint64_t run_id) noexcept`. A matching ID requests Manual stop
+through the existing atomic admission gate; a different ID returns false without
+stopping the run. The request performs no allocation, disk work or wait. Repeated
+requests do not replace an existing stop cause. Before `start()`, it cancels the
+prepared run and prevents its later start.
+
+A true return means the request was recognized, **not** that saving completed.
+The existing non-FRI finalizer drains and publishes the outcome; check `status()`
+and use `wait()` from the owner thread. Requests may overlap running callbacks
+and finalization, but must not overlap `start()` or object destruction. Complete
+a prepared-run cancellation before attempting `start()`.
+Stopping recording does not close FRI or issue a robot stop. `FriRecording` remains
+single-use: reusable sessions and ROS start/stop controls are separate future work.
+
+The existing in-memory driver fixture verifies Manual finalization, continued
+source callbacks and identical outgoing command bytes, stale/duplicate requests,
+pre-sample cancellation, earlier fault preservation and owner release with retained
+callbacks. A stop between State and Submission admission may leave one terminal
+State without a Submission; counters retain that fact and no command is invented.
+An empty manually stopped run has no captured-data evidence, regardless of generic
+file completion. The trajectory runner must apply its required coverage checks.
+
+Offline verification: driver fixture plus 13 acquisition suites pass; 25 Python
+bundle tests pass. Python readback verifies three States/three Submissions for the
+normal case and three/two for the boundary case, including all five signal groups.
+The full driver CTest still includes the documented upstream command-interface
+suite's three zero-time-constant failures. Build logs retain warnings from the
+test-only allocation instrumentation and dependency/build configuration; Python
+reports three dependency deprecation warnings. No new hardware qualification is
+claimed. See [the driver integration notes](../../patches/fri-recording/README.md).
+
+## Position and torque baseline — 18 October 2026
+
+Every State carries seven measured positions in radians. Each of its three torque
+signals independently contains zero values (unavailable) or seven values in Nm,
+in A1..A7 order:
+
+| Field | Intended live source | Meaning |
+|---|---|---|
+| `tau_measured_nm` | `getMeasuredTorque()` | Measured joint torque |
+| `tau_commanded_nm` | `getCommandedTorque()` | Controller-commanded joint torque |
+| `tau_external_estimated_nm` | `getExternalTorque()` | Controller estimate of external joint torque |
+
+These are State measurements. Submission records retain the exact seven submitted
+position values and their State association; they do not contain torque signals.
+The fixed capture record uses independent `torque_presence` bits. Clear bits
+exclude dormant array contents from serialization. Python exposes unavailable
+torques as `None`; seven zeros remain an available reading. Nonfinite values are
+preserved and reported per signal, making `data_valid=false`. Array lengths other
+than zero or seven are structural errors. The position nonfinite mask continues
+to describe positions only.
+
+The manifest records `units: {"position": "rad", "torque": "Nm"}` and MCAP
+channels carry `position_units=rad` and `torque_units=Nm`. This is a replacement
+experimental baseline: only the exact current descriptor is accepted. Earlier
+position-only recordings are unsupported; no migration or legacy-reader path is
+provided. The existing `acquisition_v1` names are retained for this prototype.
+
+`test_capture_encoding --fixture <new-directory> <descriptor>` exercises the real
+Recorder → conversion → MCAP path with one State lacking torques, one State with
+all three distinct torque arrays, and one submitted position command. The Python
+round-trip test verifies exact values (including signed zero), availability,
+timestamps, units and association. The older `offline_fixture` remains an
+additional synthetic example whose torque signals are unavailable.
 
 ## Build and verify
 
@@ -109,11 +292,11 @@ owned workers, file/bundle integration and terminal-output capture. The existing
 `offline_fixture` remains the file-format experiment; it does not use this core.
 
 Headers: `lbr_acquisition/records.hpp` and `lbr_acquisition/recorder.hpp`.
-`capture::Event` owns seven doubles and optional state metadata with a presence
-mask. `capture::Recorder` takes an explicit Config: run ID, duration in ns,
+`capture::Event` owns seven position doubles, three seven-double torque arrays,
+and separate torque/state-metadata presence masks. `capture::Recorder` takes an explicit Config: run ID, duration in ns,
 first-sample timeout in ns, maximum events and usable queue capacity. No production
-capacity or duration default is chosen. This experiment caps event count and
-queue capacity at 10000; internal queue storage includes Boost's extra slot.
+capacity or duration default is chosen. Queue capacity is capped at 10000; the total event budget is explicit per run,
+independent of queue capacity; internal queue storage includes Boost's extra slot.
 
 Call ownership is part of the API contract:
 
@@ -238,12 +421,19 @@ to a successful capture bundle.
 appends each accepted event through the shared incremental MCAP engine, and
 closes its chunk before returning from `write()`. A returned write means the
 checked sink accepted that chunk into kernel-visible output. It does not mean
-fsync or power-loss durability. The writer retains a bounded mirror of up to
-10,000 acknowledged records for independent final readback and the unchanged
-2B.3 outcome checks; this increment does not eliminate that bounded RAM cost.
-The original batch and fixture APIs, payload schema, manifest fields, quality
-format and Python readers are preserved. An exception after some bytes reach the
-partial file leaves the event uncertain: the mirror excludes it, the sink is
+fsync or power-loss durability. The live writer retains a fixed 64-byte `CaptureSummary` (counts, first/last state
+clocks and a SHA-256 hash chain), rather than retaining acknowledged records.
+The chain covers each exact encoded payload, kind, host timestamp and length in
+order. Native finalization scans one MCAP record at a time (at most 1 MiB), checks
+chunk/data CRCs and the complete expected summary, then hashes artifacts in
+64 KiB blocks. Live state association uses the latest state ID; repeated quality
+warnings are stored once per category. Recording and native verification memory
+therefore do not grow with duration. Verification remains linear in file size.
+The separate synthetic batch fixture still retains its bounded input vector.
+At the original 2B.4 checkpoint, the batch and fixture APIs, payload schema,
+manifest fields, quality format and Python readers were preserved. The later
+torque-baseline changes are documented above. An exception after some bytes reach the
+partial file leaves the event uncertain: the acknowledgement summary excludes it, the sink is
 poisoned, and the partial file is never promoted or retried.
 Final `signals.mcap` and `quality.json` publication refuses to replace an
 existing destination; a collision leaves the `.partial` file for inspection.
@@ -285,3 +475,26 @@ not encode sink type, so interpret the counter using the producing API; it alone
 never establishes a finalized file, power-loss durability, or capture success. A recoverable MCAP prefix remains an
 incomplete artifact; use `read_signals(..., recover_prefix=True)` for inspection.
 This is an offline behavior test, not a qualified live acquisition path.
+
+### Configurable live duration (2026-10-19)
+
+`LBR_RECORDING_DIRECTORY` enables a one-shot capture in a new absolute directory.
+`LBR_RECORDING_DURATION_SECONDS` selects positive decimal seconds, with up to nine
+fractional digits; unset defaults to `1`. Examples: `10`, `60.25`, `.5`. There is
+no fixed duration ceiling; values must fit the monotonic nanosecond clock and
+checked storage-budget arithmetic. Invalid values fail during setup, before UDP
+opens. Time starts at the first eligible state. The initial wait remains 60 s.
+
+The live queue stays at 4096 records. The total admission budget is two records
+per 1 ms cycle rounded up, plus 4096 records of headroom. File/event verification
+budgets derive from that total and are recorded in the manifest and `build.txt`;
+these ceilings do not allocate RAM or reserve disk. Disk-full, source interruption,
+writer failure/stall, and queue overflow still produce explicit failed outcomes.
+This supports a selected finite duration, not an indefinite run-until-stop mode.
+
+Python `read_capture_bundle(path)` uses the declared budgets and streams artifact
+hashing. Its signal analysis result intentionally materializes the records in RAM;
+optional `max_file_bytes` and `max_events` arguments limit that analysis. Standalone
+`read_signals` accepts those budgets explicitly and otherwise retains the small
+fixture defaults. Long-run analysis memory is separate from live recorder memory.
+Use the startup guide and involve the operator before connecting or capturing.

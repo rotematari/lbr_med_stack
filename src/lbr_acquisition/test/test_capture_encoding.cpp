@@ -25,6 +25,14 @@ std::vector<c::Event> fixture() {
   a.metadata.session_state = 99;
   b.position = {.25, .125, -.375, .5, -.625, .75, -.875};
   b.metadata = {63, 0, 0, 4, 3, 2, 1, .001};
+  // Values in absent fields must never manufacture a measurement.
+  a.tau_measured_nm.fill(42);
+  a.tau_commanded_nm.fill(43);
+  a.tau_external_estimated_nm.fill(44);
+  b.torque_presence = c::MeasuredTorque | c::CommandedTorque | c::EstimatedExternalTorque;
+  b.tau_measured_nm = {1.25, -0., -2.5, 3.75, -5., 6.25, -7.5};
+  b.tau_commanded_nm = {11.25, 10., -12.5, 13.75, -15., 16.25, -17.5};
+  b.tau_external_estimated_nm = {.125, -0., -.25, .375, -.5, .625, -.75};
   s.kind = c::Kind::Submission;
   s.state_id = 11;
   s.position = {.5, -.125, .25, -.375, .5, -.625, .75};
@@ -65,7 +73,12 @@ void fidelity_and_presence() {
     assert(bits(a.q_measured_rad(j)) == bits(in[0].position[j]));
     assert(bits(b.q_measured_rad(j)) == bits(in[1].position[j]));
     assert(bits(s.q_submitted_rad(j)) == bits(in[2].position[j]));
+    assert(bits(b.tau_measured_nm(j)) == bits(in[1].tau_measured_nm[j]));
+    assert(bits(b.tau_commanded_nm(j)) == bits(in[1].tau_commanded_nm[j]));
+    assert(bits(b.tau_external_estimated_nm(j)) == bits(in[1].tau_external_estimated_nm[j]));
   }
+  assert(a.tau_measured_nm_size() == 0 && a.tau_commanded_nm_size() == 0 &&
+         a.tau_external_estimated_nm_size() == 0);
   assert(a.schema_version() == 1 && b.schema_version() == 1 &&
          s.schema_version() == 1);
   assert(a.nonfinite_joint_mask() == 0 && s.nonfinite_joint_mask() == 0);
@@ -83,6 +96,36 @@ void fidelity_and_presence() {
     assert(m.has_connection_quality() == (bit == 8));
     assert(m.has_control_mode() == (bit == 16));
     assert(m.has_client_command_mode() == (bit == 32));
+  }
+}
+void torque_availability_and_validation() {
+  for (uint32_t presence = 0; presence < 8; ++presence) {
+    auto e = fixture()[1];
+    e.torque_presence = presence;
+    auto out = encode_capture_batch({e}, 17);
+    const auto &s = std::get<State>(out[0]);
+    assert(s.tau_measured_nm_size() == ((presence & 1) ? 7 : 0));
+    assert(s.tau_commanded_nm_size() == ((presence & 2) ? 7 : 0));
+    assert(s.tau_external_estimated_nm_size() == ((presence & 4) ? 7 : 0));
+  }
+  auto e = fixture()[1];
+  e.torque_presence = 8;
+  invalid([&] { encode_capture_batch({e}, 17); });
+  auto events = fixture();
+  events[2].torque_presence = c::MeasuredTorque;
+  invalid([&] { encode_capture_batch(events, 17); });
+  // Native writer validation must reject partial arrays, and retain/report
+  // nonfinite data separately for each torque signal.
+  for (int signal = 0; signal < 3; ++signal) {
+    auto out = encode_capture_batch({fixture()[1]}, 17);
+    auto &s = std::get<State>(out[0]);
+    auto *values = signal == 0 ? s.mutable_tau_measured_nm()
+                  : signal == 1 ? s.mutable_tau_commanded_nm()
+                                : s.mutable_tau_external_estimated_nm();
+    values->Set(0, std::numeric_limits<double>::quiet_NaN());
+    assert(validate_events(out).size() == 1);
+    values->RemoveLast();
+    invalid([&] { validate_events(out); });
   }
 }
 void invalid_batches() {
@@ -176,6 +219,7 @@ int main(int argc, char **argv) {
     if (argc != 1)
       return 2;
     fidelity_and_presence();
+    torque_availability_and_validation();
     invalid_batches();
     limits_and_anomalies();
   } catch (const std::exception &e) {

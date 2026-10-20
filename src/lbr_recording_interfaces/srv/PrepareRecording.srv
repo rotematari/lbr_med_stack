@@ -1,0 +1,15 @@
+# Prepare a new numbered recording. Output goes to <LBR_RECORDING_ROOT>/run-<run_id>.
+# run_id must be nonzero and greater than every earlier ID in this driver session.
+uint64 run_id
+# Watchdog: capture stops automatically after this many seconds of recording.
+# Must be positive and at most max_duration_cap_s from config/recording/limits.yaml.
+float64 max_duration_s
+# Seconds to wait for the first valid sample after start; <= 0 uses the config default.
+float64 first_sample_timeout_s
+# Free-text label (max 200 chars) saved in <directory>/request.yaml; never used as a path.
+string label
+---
+# True: files, buffers and writer are ready. Samples are not yet being captured.
+bool accepted
+string message
+string directory

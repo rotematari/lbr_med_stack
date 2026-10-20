@@ -1,6 +1,9 @@
 #pragma once
 #include "lbr_acquisition/offline_writer.hpp"
 #include "lbr_acquisition/recorder.hpp"
+#include "lbr_acquisition/capture_source.hpp"
+#include "lbr_acquisition/capture_summary.hpp"
+#include "lbr_acquisition/limits.hpp"
 
 namespace lbr_acquisition {
 // Synthetic-only, single-use batch adapter. All methods/getters require serial
@@ -21,6 +24,9 @@ public:
   void finish() override;
   State state() const noexcept { return state_; }
   uint64_t run_id() const noexcept { return run_id_; }
+  CaptureSource source() const noexcept { return CaptureSource::Synthetic; }
+  CaptureSummary summary() const;
+  CaptureLimits limits() const noexcept { return {}; }
   const std::filesystem::path &output_directory() const noexcept { return directory_; }
   // Only acknowledged writes; retained on failure, valid until destruction.
   const std::vector<capture::Event> &staged_events() const noexcept {

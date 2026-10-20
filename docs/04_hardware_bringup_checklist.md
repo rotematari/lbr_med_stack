@@ -1,5 +1,9 @@
 # 04 - Hardware bringup checklist
 
+> The current installed-robot procedure is [stationary AUT/KONI startup at 1 ms](05_stationary_fri_startup.md).
+> The KLI/10 ms and later MoveIt phases below are an older commissioning checklist.
+> For the current SysID milestone, inspect the stationary recording with Rotem before planning motion.
+
 Phased path from mock (no robot) to real-robot MoveIt. Work the phases in order. Do not skip a phase's gate.
 
 > Safety lines are not optional. Keep the e-stop in hand from Phase 1 on, and run at reduced speed first.
