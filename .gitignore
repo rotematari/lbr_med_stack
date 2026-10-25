@@ -5,6 +5,8 @@ src/*
 build/
 install/
 log/
+# separate driver builds for live runs (kept across reboots, unlike /tmp)
+overlays/
 
 # python tooling caches
 __pycache__/

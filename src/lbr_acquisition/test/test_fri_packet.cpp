@@ -48,14 +48,15 @@ std::string doubles(std::size_t count, double value = 0.) {
   return s;
 }
 std::string joints(std::size_t count = 7, double value = 0.) { return message(1, doubles(count, value)); }
+std::string fixed64(uint32_t tag, double value) { return varint((uint64_t(tag) << 3) | 1) + doubles(1, value); }
 std::string header() { return message(1, integer(1, 0x245142) + integer(2, 1) + integer(3, 0)); }
 std::string packet(const std::string &monitor) { return header() + message(3, monitor); }
 std::string full_packet() {
   return packet(message(1, joints(7, .125)) + message(2, joints(7, 11.)) +
-                message(4, joints(7, -3.)) + message(5, joints(7, .25)) +
-                message(15, integer(1, 0) + integer(2, 0))) +
+                message(3, joints(7, .375)) + message(4, joints(7, -3.)) +
+                message(5, joints(7, .25)) + message(15, integer(1, 0) + integer(2, 0))) +
          message(4, integer(1, 4) + integer(2, 3) + integer(3, 1)) +
-         message(2, integer(7, 0)) + message(5, integer(10, 1));
+         message(2, integer(2, 0) + integer(7, 0)) + message(5, integer(10, 1) + fixed64(12, 1.));
 }
 FriPacketInfo inspect(const std::string &s) {
   const auto original = s;
@@ -71,6 +72,7 @@ void invalid(const std::string &s, FriPacketError error) {
   CHECK(r.error == error);
   CHECK(!r.measured_position.present && r.measured_position.count == 0);
   CHECK(!r.measured_torque.present && !r.commanded_torque.present && !r.external_torque.present);
+  CHECK(!r.commanded_position.present && r.commanded_position.count == 0);
   CHECK(r.metadata_presence == 0);
 }
 
@@ -81,23 +83,27 @@ void complete_and_absent() {
   CHECK(r.measured_torque.present && r.measured_torque.count == 7);
   CHECK(r.commanded_torque.present && r.commanded_torque.count == 7);
   CHECK(r.external_torque.present && r.external_torque.count == 7);
-  CHECK(r.metadata_presence == 63);
+  CHECK(r.commanded_position.present && r.commanded_position.count == 7);
+  CHECK(r.metadata_presence == 255);
   // A second datagram must not inherit any availability from the first.
   r = inspect(header());
   CHECK(r.valid());
   CHECK(!r.measured_position.present && !r.measured_torque.present);
   CHECK(!r.commanded_torque.present && !r.external_torque.present);
+  CHECK(!r.commanded_position.present);
   CHECK(r.metadata_presence == 0);
-  for (unsigned mask = 0; mask < 8; ++mask) {
+  for (unsigned mask = 0; mask < 16; ++mask) {
     std::string monitor = message(1, joints());
     if (mask & 1) monitor += message(2, joints());
     if (mask & 2) monitor += message(4, joints());
     if (mask & 4) monitor += message(5, joints());
+    if (mask & 8) monitor += message(3, joints());
     r = inspect(packet(monitor));
     CHECK(r.valid());
     CHECK(r.measured_torque.present == bool(mask & 1));
     CHECK(r.commanded_torque.present == bool(mask & 2));
     CHECK(r.external_torque.present == bool(mask & 4));
+    CHECK(r.commanded_position.present == bool(mask & 8));
   }
 }
 
@@ -117,7 +123,7 @@ void repeated_encoding_and_values() {
     CHECK(r.valid()); // Nonfinite validity is checked on SDK values in the later adapter.
     CHECK(r.measured_torque.present && r.measured_torque.count == 7);
   }
-  for (uint32_t tag : {1, 2, 4, 5}) {
+  for (uint32_t tag : {1, 2, 3, 4, 5}) {
     for (std::size_t count : {0, 6, 8})
       invalid(packet(message(tag, joints(count))), FriPacketError::InvalidArrayLength);
     invalid(packet(message(tag, "")), FriPacketError::InvalidArrayLength);
@@ -127,10 +133,14 @@ void repeated_encoding_and_values() {
 void metadata_presence() {
   const auto time = message(3, message(15, integer(1, 0) + integer(2, 0)));
   const auto connection = message(4, integer(1, 0) + integer(2, 0));
-  const std::array<std::pair<std::string, uint32_t>, 5> cases{{
+  const std::array<std::pair<std::string, uint32_t>, 9> cases{{
     {time, c::ControllerTime}, {connection, c::Session | c::Quality},
     {message(4, integer(1, 0) + integer(2, 0) + integer(3, 0)), c::Session | c::Quality | c::SamplePeriod},
-    {message(2, integer(7, 0)), c::Control}, {message(5, integer(10, 0)), c::Command}
+    {message(2, integer(7, 0)), c::Control}, {message(5, integer(10, 0)), c::Command},
+    {message(2, integer(2, 3)), c::Safety}, {message(5, fixed64(12, .5)), c::Tracking},
+    // Tracking performance 0 and a nonfinite value are data; range checks come later.
+    {message(5, fixed64(12, 0.)), c::Tracking},
+    {message(5, fixed64(12, std::numeric_limits<double>::quiet_NaN())), c::Tracking}
   }};
   for (const auto &item : cases) {
     const auto r = inspect(header() + item.first);
@@ -143,11 +153,14 @@ void metadata_presence() {
   invalid(message(1, integer(1, 0x245142)), FriPacketError::MissingRequiredField);
   invalid(message(1, integer(1, 42) + integer(2, 1) + integer(3, 0)), FriPacketError::WrongMessageType);
   invalid(header() + message(4, integer(1, 4) + integer(2, 3) + integer(3, uint64_t(1) << 32)), FriPacketError::Malformed);
+  invalid(header() + message(2, integer(2, uint64_t(1) << 32)), FriPacketError::Malformed);
+  invalid(header() + message(5, integer(12, 1)), FriPacketError::Malformed); // trackingPerformance is a double
+  invalid(header() + message(2, fixed64(2, 0.)), FriPacketError::Malformed); // safetyState is a varint
 }
 
 void duplicate_fields() {
   invalid(header() + header(), FriPacketError::DuplicateField);
-  for (uint32_t tag : {1, 2, 4, 5})
+  for (uint32_t tag : {1, 2, 3, 4, 5})
     invalid(packet(message(tag, joints()) + message(tag, joints())), FriPacketError::DuplicateField);
   for (const auto &part : {message(2, integer(7, 0)), message(3, ""),
                            message(4, integer(1, 4) + integer(2, 3)), message(5, integer(10, 1))})
@@ -157,6 +170,8 @@ void duplicate_fields() {
   invalid(header() + message(4, integer(1, 4) + integer(1, 4) + integer(2, 3)), FriPacketError::DuplicateField);
   invalid(header() + message(2, integer(7, 0) + integer(7, 0)), FriPacketError::DuplicateField);
   invalid(header() + message(5, integer(10, 1) + integer(10, 1)), FriPacketError::DuplicateField);
+  invalid(header() + message(2, integer(2, 0) + integer(2, 0)), FriPacketError::DuplicateField);
+  invalid(header() + message(5, fixed64(12, 1.) + fixed64(12, 1.)), FriPacketError::DuplicateField);
 }
 
 void malformed_lengths_and_wire() {

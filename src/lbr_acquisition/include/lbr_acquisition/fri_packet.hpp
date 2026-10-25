@@ -18,6 +18,7 @@ struct FriArrayInfo {
 struct FriPacketInfo {
   FriPacketError error = FriPacketError::InvalidInput;
   FriArrayInfo measured_position{}, measured_torque{}, commanded_torque{}, external_torque{};
+  FriArrayInfo commanded_position{};
   // Uses capture::Presence. Values are read from the SDK only after its decode succeeds.
   uint32_t metadata_presence = 0;
   bool valid() const noexcept { return error == FriPacketError::None; }

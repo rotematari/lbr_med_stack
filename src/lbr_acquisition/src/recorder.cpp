@@ -125,12 +125,14 @@ Offer Recorder::offer(const Event &e, bool eligible) noexcept {
   for (size_t i = 0; i < e.position.size(); ++i)
     if (!std::isfinite(e.position[i])) nonfinite_mask |= uint32_t{1} << i;
   constexpr uint32_t known_metadata = ControllerTime | SamplePeriod | Session |
-                                      Quality | Control | Command;
+                                      Quality | Control | Command | Safety | Tracking;
   constexpr uint32_t known_torques = MeasuredTorque | CommandedTorque | EstimatedExternalTorque;
   const bool valid_payload = nonfinite_mask == e.nonfinite_joint_mask &&
       !(e.metadata.presence & ~known_metadata) &&
       !(e.torque_presence & ~known_torques) &&
-      (e.kind != Kind::Submission || (!e.metadata.presence && !e.torque_presence));
+      !(e.signal_presence & ~CommandedJointPosition) &&
+      (e.kind != Kind::Submission ||
+       (!e.metadata.presence && !e.torque_presence && !e.signal_presence));
   if ((!valid_state && !valid_submission) || !valid_payload) {
     rejected_.fetch_add(1);
     close(Reason::InvalidEvent);

@@ -114,6 +114,12 @@ private:
     result_.metadata_presence |= presence;
     return true;
   }
+  bool tracking(uint32_t &seen, const Field &field) noexcept {
+    // A double (fixed64); its value, including 0 or nonfinite, is read from the SDK later.
+    if (!once(seen, field, 1)) return false;
+    result_.metadata_presence |= capture::Tracking;
+    return true;
+  }
   bool message(Bytes bytes, Message type) noexcept {
     // Only fixed schema edges recurse: Root -> Monitor -> Timestamp (depth 3).
     // Unknown length-delimited fields are opaque and never recurse.
@@ -144,6 +150,7 @@ private:
         switch (f.tag) {
         case 1: if (!array(seen, f, result_.measured_position)) return false; break;
         case 2: if (!array(seen, f, result_.measured_torque)) return false; break;
+        case 3: if (!array(seen, f, result_.commanded_position)) return false; break;
         case 4: if (!array(seen, f, result_.commanded_torque)) return false; break;
         case 5: if (!array(seen, f, result_.external_torque)) return false; break;
         case 15: if (!child(seen, f, Message::Timestamp)) return false; break;
@@ -159,10 +166,12 @@ private:
         }
         break;
       case Message::Robot:
+        if (f.tag == 2 && !metadata(seen, f, capture::Safety)) return false;
         if (f.tag == 7 && !metadata(seen, f, capture::Control)) return false;
         break;
       case Message::Ipo:
         if (f.tag == 10 && !metadata(seen, f, capture::Command)) return false;
+        if (f.tag == 12 && !tracking(seen, f)) return false;
         break;
       case Message::Timestamp:
         if ((f.tag == 1 || f.tag == 2) && !scalar(seen, f)) return false;

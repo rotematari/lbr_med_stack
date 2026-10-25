@@ -13,13 +13,16 @@ OfflineEvent encode_capture_event(const capture::Event &e,
     const auto &m = e.metadata;
     constexpr uint32_t known = capture::ControllerTime | capture::SamplePeriod |
                                capture::Session | capture::Quality |
-                               capture::Control | capture::Command;
+                               capture::Control | capture::Command |
+                               capture::Safety | capture::Tracking;
     if (m.presence & ~known)
       throw InvalidInput("unsupported capture metadata presence");
     constexpr uint32_t known_torques = capture::MeasuredTorque | capture::CommandedTorque |
                                        capture::EstimatedExternalTorque;
     if (e.torque_presence & ~known_torques)
       throw InvalidInput("unsupported torque presence");
+    if (e.signal_presence & ~capture::CommandedJointPosition)
+      throw InvalidInput("unsupported signal presence");
     if (e.kind == capture::Kind::State) {
       if (e.state_id != e.id)
         throw InvalidInput("capture State identity mismatch");
@@ -36,6 +39,8 @@ OfflineEvent encode_capture_event(const capture::Event &e,
         for (double tau : e.tau_commanded_nm) s.add_tau_commanded_nm(tau);
       if (e.torque_presence & capture::EstimatedExternalTorque)
         for (double tau : e.tau_external_estimated_nm) s.add_tau_external_estimated_nm(tau);
+      if (e.signal_presence & capture::CommandedJointPosition)
+        for (double q : e.q_commanded_rad) s.add_q_commanded_rad(q);
       if (m.presence & capture::ControllerTime) {
         s.set_controller_sec(m.controller_sec);
         s.set_controller_nsec(m.controller_nsec);
@@ -50,9 +55,14 @@ OfflineEvent encode_capture_event(const capture::Event &e,
         s.set_control_mode(m.control_mode);
       if (m.presence & capture::Command)
         s.set_client_command_mode(m.client_command_mode);
+      if (m.presence & capture::Safety)
+        s.set_safety_state(m.safety_state);
+      if (m.presence & capture::Tracking)
+        s.set_tracking_performance(m.tracking_performance);
       return s;
     } else if (e.kind == capture::Kind::Submission) {
-      if (m.presence || e.torque_presence || !latest_state || e.state_id != latest_state)
+      if (m.presence || e.torque_presence || e.signal_presence || !latest_state ||
+          e.state_id != latest_state)
         throw InvalidInput(
             "invalid capture Submission metadata or association");
       lbr::acquisition::v1::Submission s;

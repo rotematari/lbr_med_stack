@@ -156,6 +156,29 @@ test-only allocation instrumentation and dependency/build configuration; Python
 reports three dependency deprecation warnings. No new hardware qualification is
 claimed. See [the driver integration notes](../../patches/fri-recording/README.md).
 
+## KUKA status signals — 24 October 2026
+
+Each State can also carry three KUKA-side signals, each present only when the FRI
+packet held the field (presence comes from the packet inspector, values from the SDK):
+
+| Field | Live source (FRI tag) | Meaning |
+|---|---|---|
+| `q_commanded_rad` | `getCommandedJointPosition()` (monitorData 3) | Controller's last commanded joint positions, rad; 0 or 7 values |
+| `tracking_performance` | `getTrackingPerformance()` (ipoData 12) | Documented 1.0 = commands executed instantly, dropping towards 0 when velocity, acceleration or jerk exceed the robot's capabilities |
+| `safety_state` | `getSafetyState()` (robotInfo 2) | Raw ESafetyState code: 0 normal, 1–3 safety stop levels 0–2 |
+
+Presence matters because `getCommandedJointPosition()` returns the SDK's decode buffer
+from whichever packet last filled it, and `getTrackingPerformance()` returns 0.0 when
+the field is absent. The capture record holds them in `signal_presence`
+(`CommandedJointPosition`) and the metadata bits `Safety` / `Tracking`. Validation:
+partial arrays are structural errors; nonfinite commanded positions, tracking
+performance outside [0, 1] and unknown safety codes are kept and reported as issues.
+The change is additive (`schema_version` stays 1). The Python readers
+(`robot_sysid.data`, `robot_sysid.bundle`) also accept the pinned descriptor of the
+18 October baseline below, so every recording made before this change still loads;
+one file may not mix descriptors, and a run's manifest must name the descriptor its
+MCAP carries. The native writer and readback accept only the current descriptor.
+
 ## Position and torque baseline — 18 October 2026
 
 Every State carries seven measured positions in radians. Each of its three torque
@@ -178,10 +201,9 @@ than zero or seven are structural errors. The position nonfinite mask continues
 to describe positions only.
 
 The manifest records `units: {"position": "rad", "torque": "Nm"}` and MCAP
-channels carry `position_units=rad` and `torque_units=Nm`. This is a replacement
-experimental baseline: only the exact current descriptor is accepted. Earlier
-position-only recordings are unsupported; no migration or legacy-reader path is
-provided. The existing `acquisition_v1` names are retained for this prototype.
+channels carry `position_units=rad` and `torque_units=Nm`. This was a replacement
+experimental baseline: earlier position-only recordings are unsupported, with no
+migration path. (Its own descriptor stays readable after the 24 October addition.) The existing `acquisition_v1` names are retained for this prototype.
 
 `test_capture_encoding --fixture <new-directory> <descriptor>` exercises the real
 Recorder → conversion → MCAP path with one State lacking torques, one State with

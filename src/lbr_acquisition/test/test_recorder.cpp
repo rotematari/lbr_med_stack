@@ -61,7 +61,13 @@ void owns_records_and_reports_overflow() {
   e.tau_measured_nm = {1.25, -0., -2.5, 3.75, -5., 6.25, -7.5};
   e.tau_commanded_nm.fill(2.5);
   e.tau_external_estimated_nm.fill(-.25);
+  e.metadata.presence |= Safety | Tracking;
+  e.metadata.safety_state = 1;
+  e.metadata.tracking_performance = .5;
+  e.signal_presence = CommandedJointPosition;
+  e.q_commanded_rad = {-.5, -0., .25, -.375, .5, -.625, .75};
   assert(r.offer(e) == Offer::Accepted);
+  e.q_commanded_rad.fill(99);
   e.position.fill(99);
   e.tau_measured_nm.fill(99);
   e.tau_commanded_nm.fill(99);
@@ -82,6 +88,12 @@ void owns_records_and_reports_overflow() {
          std::signbit(sink.events[0].tau_measured_nm[1]));
   assert(sink.events[0].tau_commanded_nm[6] == 2.5);
   assert(sink.events[0].tau_external_estimated_nm[6] == -.25);
+  assert(sink.events[0].metadata.presence == 255);
+  assert(sink.events[0].metadata.safety_state == 1 &&
+         sink.events[0].metadata.tracking_performance == .5);
+  assert(sink.events[0].signal_presence == CommandedJointPosition);
+  assert(sink.events[0].q_commanded_rad[0] == -.5 &&
+         std::signbit(sink.events[0].q_commanded_rad[1]));
   assert(sink.events[1].position[0] == .5 && sink.events[1].state_id == 1);
   assert(sink.finishes == 1 && !r.writer_step(sink));
 }
@@ -288,14 +300,14 @@ void invalid_configuration() {
   }
 }
 void malformed_payload_is_rejected_before_the_writer() {
-  for (unsigned fault = 0; fault < 6; ++fault) {
+  for (unsigned fault = 0; fault < 8; ++fault) {
     Recorder r(config());
     Sink sink;
     assert(r.start(7, 100));
     auto e = state(1, 101);
     if (fault == 0) e.nonfinite_joint_mask = 1;
     if (fault == 1) e.position[0] = std::numeric_limits<double>::quiet_NaN();
-    if (fault == 2) e.metadata.presence = 64;
+    if (fault == 2) e.metadata.presence = 256;
     if (fault == 3) {
       assert(r.offer(e) == Offer::Accepted);
       e = submission(1, 1, 102);
@@ -307,12 +319,18 @@ void malformed_payload_is_rejected_before_the_writer() {
       e = submission(1, 1, 102);
       e.torque_presence = MeasuredTorque;
     }
+    if (fault == 6) e.signal_presence = 2;
+    if (fault == 7) {
+      assert(r.offer(e) == Offer::Accepted);
+      e = submission(1, 1, 102);
+      e.signal_presence = CommandedJointPosition;
+    }
     assert(r.offer(e) == Offer::Rejected);
     drain(r, sink);
     const auto s = r.status();
     assert(s.reason == Reason::InvalidEvent && s.rejected == 1);
     assert(s.write_uncertain == 0 && s.abandoned == 0);
-    assert(s.written == (fault == 3 || fault == 5 ? 1 : 0));
+    assert(s.written == (fault == 3 || fault == 5 || fault == 7 ? 1 : 0));
   }
 }
 void ten_second_capture_uses_configured_event_budget() {

@@ -19,6 +19,13 @@ message State {
   repeated double tau_measured_nm = 13 [packed = true];
   repeated double tau_commanded_nm = 14 [packed = true];
   repeated double tau_external_estimated_nm = 15 [packed = true];
+  // KUKA-side status, recorded as delivered by the FRI SDK 1.15 (absent when the
+  // packet lacks the field). q_commanded_rad: 0 or 7 values, the controller's last
+  // commanded joint positions. tracking_performance: documented range [0, 1].
+  // safety_state: raw ESafetyState code.
+  repeated double q_commanded_rad = 16 [packed = true];
+  optional double tracking_performance = 17;
+  optional uint32 safety_state = 18;
 }
 
 message Submission {

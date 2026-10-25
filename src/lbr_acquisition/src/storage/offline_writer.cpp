@@ -197,7 +197,8 @@ struct EventValidator {
             const std::pair<const char *, const google::protobuf::RepeatedField<double> *> torques[] = {
                 {"tau_measured_nm", &m.tau_measured_nm()},
                 {"tau_commanded_nm", &m.tau_commanded_nm()},
-                {"tau_external_estimated_nm", &m.tau_external_estimated_nm()}};
+                {"tau_external_estimated_nm", &m.tau_external_estimated_nm()},
+                {"q_commanded_rad", &m.q_commanded_rad()}};
             for (const auto &[name, values] : torques) {
               if (values->size() != 0 && values->size() != 7)
                 throw InvalidInput(std::string(name) + ": expected zero or seven joints");
@@ -216,8 +217,13 @@ struct EventValidator {
             if ((m.has_session_state() && m.session_state() > 4) ||
                 (m.has_connection_quality() && m.connection_quality() > 3) ||
                 (m.has_control_mode() && m.control_mode() > 3) ||
-                (m.has_client_command_mode() && m.client_command_mode() > 3))
+                (m.has_client_command_mode() && m.client_command_mode() > 3) ||
+                (m.has_safety_state() && m.safety_state() > 3))
               issue("unknown SDK code");
+            // Documented range [0, 1]; the negated form also catches NaN.
+            if (m.has_tracking_performance() &&
+                !(m.tracking_performance() >= 0 && m.tracking_performance() <= 1))
+              issue("invalid tracking performance");
           } else {
             if (m.submission_id() <= last_submission)
               throw InvalidInput(

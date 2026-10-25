@@ -101,6 +101,8 @@ void RecorderAdapter::on_state(const KUKA::FRI::LBRState &state) noexcept {
   if (meta.presence & c::Quality) meta.connection_quality = state.getConnectionQuality();
   if (meta.presence & c::Control) meta.control_mode = state.getControlMode();
   if (meta.presence & c::Command) meta.client_command_mode = state.getClientCommandMode();
+  if (meta.presence & c::Safety) meta.safety_state = state.getSafetyState();
+  if (meta.presence & c::Tracking) meta.tracking_performance = state.getTrackingPerformance();
   constexpr uint32_t required = c::SamplePeriod | c::Session | c::Control | c::Command;
   const bool position_mode = (meta.presence & required) == required &&
       meta.session_state == KUKA::FRI::COMMANDING_ACTIVE &&
@@ -127,6 +129,11 @@ void RecorderAdapter::on_state(const KUKA::FRI::LBRState &state) noexcept {
     if (packet_.external_torque.present) {
       event.torque_presence |= c::EstimatedExternalTorque;
       std::copy_n(state.getExternalTorque(), 7, event.tau_external_estimated_nm.begin());
+    }
+    // The SDK getter returns its decode buffer even when this packet lacked the field.
+    if (packet_.commanded_position.present) {
+      event.signal_presence |= c::CommandedJointPosition;
+      std::copy_n(state.getCommandedJointPosition(), 7, event.q_commanded_rad.begin());
     }
   }
   if (endpoint_.offer(endpoint_.context, event, eligible) == c::Offer::Accepted)

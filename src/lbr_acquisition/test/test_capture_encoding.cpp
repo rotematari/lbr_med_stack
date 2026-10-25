@@ -33,6 +33,14 @@ std::vector<c::Event> fixture() {
   b.tau_measured_nm = {1.25, -0., -2.5, 3.75, -5., 6.25, -7.5};
   b.tau_commanded_nm = {11.25, 10., -12.5, 13.75, -15., 16.25, -17.5};
   b.tau_external_estimated_nm = {.125, -0., -.25, .375, -.5, .625, -.75};
+  a.q_commanded_rad.fill(45);
+  a.metadata.safety_state = 2;
+  a.metadata.tracking_performance = .25;
+  b.metadata.presence |= c::Safety | c::Tracking;
+  b.metadata.safety_state = 3;
+  b.metadata.tracking_performance = .875;
+  b.signal_presence = c::CommandedJointPosition;
+  b.q_commanded_rad = {.375, -0., -.5, .625, -.75, .875, -1.};
   s.kind = c::Kind::Submission;
   s.state_id = 11;
   s.position = {.5, -.125, .25, -.375, .5, -.625, .75};
@@ -69,7 +77,11 @@ void fidelity_and_presence() {
   assert(b.reported_sample_period_s() == .001 && b.session_state() == 4 &&
          b.connection_quality() == 3);
   assert(b.control_mode() == 2 && b.client_command_mode() == 1);
+  assert(b.safety_state() == 3 && b.tracking_performance() == .875);
+  assert(!a.has_safety_state() && !a.has_tracking_performance() && a.q_commanded_rad_size() == 0);
+  assert(b.q_commanded_rad_size() == 7);
   for (int j = 0; j < 7; ++j) {
+    assert(bits(b.q_commanded_rad(j)) == bits(in[1].q_commanded_rad[j]));
     assert(bits(a.q_measured_rad(j)) == bits(in[0].position[j]));
     assert(bits(b.q_measured_rad(j)) == bits(in[1].position[j]));
     assert(bits(s.q_submitted_rad(j)) == bits(in[2].position[j]));
@@ -84,7 +96,7 @@ void fidelity_and_presence() {
   assert(a.nonfinite_joint_mask() == 0 && s.nonfinite_joint_mask() == 0);
   in[0].position.fill(42);
   assert(a.q_measured_rad(0) == .125); // independent ownership
-  for (uint32_t bit = 1; bit <= 32; bit <<= 1) {
+  for (uint32_t bit = 1; bit <= 128; bit <<= 1) {
     auto e = fixture()[1];
     e.metadata.presence = bit;
     auto batch = encode_capture_batch({e}, 17);
@@ -96,6 +108,8 @@ void fidelity_and_presence() {
     assert(m.has_connection_quality() == (bit == 8));
     assert(m.has_control_mode() == (bit == 16));
     assert(m.has_client_command_mode() == (bit == 32));
+    assert(m.has_safety_state() == (bit == 64));
+    assert(m.has_tracking_performance() == (bit == 128));
   }
 }
 void torque_availability_and_validation() {
@@ -128,6 +142,44 @@ void torque_availability_and_validation() {
     invalid([&] { validate_events(out); });
   }
 }
+void commanded_position_and_kuka_status_validation() {
+  for (uint32_t presence = 0; presence < 2; ++presence) {
+    auto e = fixture()[1];
+    e.signal_presence = presence;
+    auto out = encode_capture_batch({e}, 17);
+    assert(std::get<State>(out[0]).q_commanded_rad_size() == (presence ? 7 : 0));
+  }
+  auto e = fixture()[1];
+  e.signal_presence = 2;
+  invalid([&] { encode_capture_batch({e}, 17); });
+  auto events = fixture();
+  events[2].signal_presence = c::CommandedJointPosition;
+  invalid([&] { encode_capture_batch(events, 17); });
+  // Commanded positions: partial arrays are structural faults; nonfinite values are data.
+  auto out = encode_capture_batch({fixture()[1]}, 17);
+  auto &m = std::get<State>(out[0]);
+  assert(validate_events(out).empty());
+  m.set_q_commanded_rad(0, std::numeric_limits<double>::quiet_NaN());
+  assert(validate_events(out).size() == 1);
+  m.mutable_q_commanded_rad()->RemoveLast();
+  invalid([&] { validate_events(out); });
+  // Tracking performance is documented in [0, 1]; SDK 1.15 knows safety codes 0..3.
+  for (double tracking : {0., 1.})
+    for (uint32_t safety : {0u, 3u}) {
+      auto ok = encode_capture_batch({fixture()[1]}, 17);
+      std::get<State>(ok[0]).set_tracking_performance(tracking);
+      std::get<State>(ok[0]).set_safety_state(safety);
+      assert(validate_events(ok).empty());
+    }
+  for (double tracking : {-.001, 1.001, std::numeric_limits<double>::quiet_NaN()}) {
+    auto bad = encode_capture_batch({fixture()[1]}, 17);
+    std::get<State>(bad[0]).set_tracking_performance(tracking);
+    assert(validate_events(bad).size() == 1);
+  }
+  auto bad = encode_capture_batch({fixture()[1]}, 17);
+  std::get<State>(bad[0]).set_safety_state(4);
+  assert(validate_events(bad).size() == 1);
+}
 void invalid_batches() {
   assert(encode_capture_batch({}, 17).empty());
   invalid([] { encode_capture_batch({}, 0); });
@@ -141,7 +193,7 @@ void invalid_batches() {
       in[1].kind = static_cast<c::Kind>(99);
       break;
     case 2:
-      in[1].metadata.presence = 64;
+      in[1].metadata.presence = 256;
       break;
     case 3:
       in[1].state_id = 9;
@@ -220,6 +272,7 @@ int main(int argc, char **argv) {
       return 2;
     fidelity_and_presence();
     torque_availability_and_validation();
+    commanded_position_and_kuka_status_validation();
     invalid_batches();
     limits_and_anomalies();
   } catch (const std::exception &e) {

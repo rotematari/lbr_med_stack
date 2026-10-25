@@ -30,6 +30,12 @@ inline std::string integer(unsigned tag, uint64_t v) { return varint(tag << 3) +
 inline std::string message(unsigned tag, const std::string &s) {
   return varint((tag << 3) | 2) + varint(s.size()) + s;
 }
+inline std::string fixed64(unsigned tag, double v) {
+  uint64_t bits; std::memcpy(&bits, &v, 8);
+  std::string s = varint((tag << 3) | 1);
+  for (unsigned b = 0; b < 8; ++b) s += char(bits >> (8 * b));
+  return s;
+}
 inline Joints values(double base) {
   Joints v{};
   for (size_t j = 0; j < v.size(); ++j) v[j] = base + double(j) * .01;
@@ -43,9 +49,13 @@ inline std::string joints(const Joints &v) {
   }
   return message(1, bytes);
 }
-inline std::string packet(unsigned seq, unsigned session, unsigned torques = 7) {
+// kuka_status: commanded joint positions (values(.2 + seq)), safety state (seq % 4) and
+// tracking performance (.25 * (seq % 5)); all three are absent when false.
+inline std::string packet(unsigned seq, unsigned session, unsigned torques = 7,
+                          bool kuka_status = true) {
   const auto q = values(.1 + .001 * seq);
-  std::string monitor = message(1, joints(q)) + message(3, joints(values(.2)));
+  std::string monitor = message(1, joints(q));
+  if (kuka_status) monitor += message(3, joints(values(.2 + seq)));
   if (torques & 1) monitor += message(2, joints(values(10. + seq)));
   if (torques & 2) monitor += message(4, joints(values(-3. - seq)));
   if (torques & 4) monitor += message(5, joints(values(.5 + seq)));
@@ -53,10 +63,12 @@ inline std::string packet(unsigned seq, unsigned session, unsigned torques = 7) 
   std::string drives;
   for (int j = 0; j < 7; ++j) drives += integer(5, 2);
   return message(1, integer(1, 0x245142) + integer(2, seq) + integer(3, 0)) +
-         message(2, integer(1, 7) + integer(2, 0) + drives + integer(6, 0) + integer(7, 0)) +
+         message(2, integer(1, 7) + (kuka_status ? integer(2, seq % 4) : std::string()) + drives +
+                    integer(6, 0) + integer(7, 0)) +
          message(3, monitor) +
          message(4, integer(1, session) + integer(2, 3) + integer(3, 1) + integer(4, 2)) +
-         message(5, message(1, joints(q)) + integer(10, 1) + integer(11, 1));
+         message(5, message(1, joints(q)) + integer(10, 1) + integer(11, 1) +
+                    (kuka_status ? fixed64(12, .25 * (seq % 5)) : std::string()));
 }
 
 struct MemoryConnection : KUKA::FRI::IConnection {

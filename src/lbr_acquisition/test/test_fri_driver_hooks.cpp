@@ -59,7 +59,7 @@ Result run(bool enabled, bool fill_queue = false) {
   auto adapter = std::make_shared<RecorderAdapter>(1, endpoint, clock_ns);
   auto memory = std::make_unique<MemoryConnection>();
   auto *wire = memory.get();
-  wire->inputs = {packet(0, 2), packet(1, 4), packet(2, 4), packet(3, 4, 2),
+  wire->inputs = {packet(0, 2), packet(1, 4), packet(2, 4), packet(3, 4, 2, false),
                   packet(4, 2), packet(5, 4)};
   std::unique_ptr<KUKA::FRI::IConnection> connection;
   if (enabled) connection = std::make_unique<ObservedConnection>(std::move(memory), adapter);
@@ -658,7 +658,13 @@ int main(int argc, char **argv) {
       const auto &submission = enabled.events[(i - 1) * 2 + 1];
       CHECK(state.kind == c::Kind::State && state.state_id == state.id);
       CHECK(state.position == values(.1 + .001 * i));
-      CHECK(state.metadata.presence == 63 && state.metadata.controller_sec == 42);
+      CHECK(state.metadata.presence == (i == 3 ? 63u : 255u) && state.metadata.controller_sec == 42);
+      // Packet 3 lacks KUKA status; the SDK's commanded-position buffer still holds
+      // packet 2's values, which must not be recorded.
+      CHECK(state.signal_presence == (i == 3 ? 0u : uint32_t(c::CommandedJointPosition)));
+      CHECK(state.q_commanded_rad == (i == 3 ? Joints{} : values(.2 + i)));
+      CHECK(state.metadata.safety_state == (i == 3 ? 0u : i % 4));
+      CHECK(state.metadata.tracking_performance == (i == 3 ? 0. : .25 * (i % 5)));
       CHECK(state.metadata.controller_nsec == i * 1000000);
       CHECK(state.metadata.reported_sample_period_s == .001);
       CHECK(state.torque_presence == (i == 3 ? 2u : 7u));
