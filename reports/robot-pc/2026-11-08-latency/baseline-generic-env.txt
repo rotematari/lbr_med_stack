@@ -1,0 +1,6 @@
+Linux bro-103-01-pcl 6.8.0-110-generic #110-Ubuntu SMP PREEMPT_DYNAMIC Thu Mar 19 15:09:20 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+BOOT_IMAGE=/boot/vmlinuz-6.8.0-110-generic root=UUID=a9f4af19-1f7a-471c-8295-cb25c0f9a093 ro quiet splash vt.handoff=7
+powersave
+start 2026-11-08T13:34:24+02:00
+end 2026-11-08T13:35:57+02:00
+stopped early 2026-11-08T13:36:00+02:00

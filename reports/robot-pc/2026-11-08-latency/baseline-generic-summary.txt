@@ -1,0 +1,2 @@
+WARN: distance is ignored and set to 0, if histogram enabled
+# /dev/cpu_dma_latency set to 0us

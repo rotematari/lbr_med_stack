@@ -1,0 +1,5 @@
+Linux bro-103-01-pcl 6.8.1-1064-realtime #65-Ubuntu SMP PREEMPT_RT Wed Oct 28 20:08:52 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+BOOT_IMAGE=/boot/vmlinuz-6.8.1-1064-realtime root=UUID=a9f4af19-1f7a-471c-8295-cb25c0f9a093 ro quiet splash isolcpus=managed_irq,domain,2-5 nohz_full=2-5 rcu_nocbs=2-5 irqaffinity=0-1,6-23 vt.handoff=7
+performance
+start 2026-11-08T13:42:12+02:00
+end 2026-11-08T13:43:22+02:00

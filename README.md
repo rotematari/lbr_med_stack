@@ -65,6 +65,8 @@ their older KLI settings are not the current stationary-session settings:
 [`docs/02_network_setup.md`](docs/02_network_setup.md) ->
 [`docs/03_sunrise_side_setup.md`](docs/03_sunrise_side_setup.md) ->
 [`docs/04_hardware_bringup_checklist.md`](docs/04_hardware_bringup_checklist.md).
+The dedicated robot PC and its real-time kernel are described in
+[`docs/06_robot_pc_rt_setup.md`](docs/06_robot_pc_rt_setup.md).
 
 ## Repo layout
 
