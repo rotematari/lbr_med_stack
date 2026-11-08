@@ -180,13 +180,18 @@ the workstation's `live-signals` builds, so the workstation's `LBR_GENERATED_PYT
 The recorder creates the root when the driver starts, so a `--record` session with no recording leaves an
 empty `<root>/`; delete it before analysis commands that pick the latest session.
 
+First live check, 8 November 2026 (arm stationary, `--record rt-check`): run 1 prepared, started and stopped
+from the workstation, `Finalized` with 12804 records written (6402 states and 6402 submissions, 6.4 s, one
+interval over 2 ms, max 3.5 ms). `fetch_recordings.sh` only copied while the driver ran and moved the session
+after it stopped, leaving nothing on this PC. `inspect_service_runs.py`: all five signal groups, links OK;
+`run_check.py`: safety state 0, no late-cycle warnings, `OK`. Data:
+`03_projects/tactile-cable-sysid/runs/robot-sysid/2026-11-08-rt-check-153059/` (git-ignored).
+
 ## Open items
 
 - 02 and 05 carry a note pointing here (8 November 2026); their bodies still describe the workstation as the FRI
   host and `LOCALHOST` discovery. The workstation live environment (`tactile-cable-sysid/operations/robot-sysid/live_env.sh`)
   now uses `SUBNET`, and its `live_driver.sh` refuses to start without `192.170.10.1`.
-- `--record` not yet run live: check that `run-1` appears under the root after a prepare/start/stop, that
-  `fetch_recordings.sh` moves it, and that `run_check.py` reads it.
 - Workstation `~/.bashrc` now sets `ROS_DOMAIN_ID=85` and `ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET` (Rotem,
   8 November 2026; original in `~/.bashrc.bak-2026-11-08`). New terminals there join the live robot's domain:
   mock bringups must source `viz/mock_env.sh` (domain 86).
