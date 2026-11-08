@@ -159,9 +159,9 @@ second until the next goal moved A6 away. Keep goals clear of the A6 limit.
 ## Driver scripts and recordings
 
 The robot PC's scripts are tracked in [`scripts/robot-rt/`](../scripts/robot-rt/) (8 November 2026):
-`launch_stationary.sh` and `build_lbr.sh`. On this PC they will run from `~/lbr_med_stack/overlays/` as
-symlinks to the tracked files once the switch-over in Open items is done; the untracked copy there has no
-`--record`. Start the driver from the workstation:
+`launch_stationary.sh` and `build_lbr.sh`. On this PC they run from `~/lbr_med_stack/overlays/` as symlinks
+to the tracked files (switched on 8 November 2026 at `b67eba0`; the earlier untracked copies are in
+`overlays/old-2026-11-08/`). Update them with `git pull` in `~/lbr_med_stack`, with no driver running. Start the driver from the workstation:
 
 ```bash
 ssh -t robot-rt '~/lbr_med_stack/overlays/launch_stationary.sh'                 # no recording
@@ -182,14 +182,9 @@ empty `<root>/`; delete it before analysis commands that pick the latest session
 
 ## Open items
 
-
 - 02 and 05 carry a note pointing here (8 November 2026); their bodies still describe the workstation as the FRI
   host and `LOCALHOST` discovery. The workstation live environment (`tactile-cable-sysid/operations/robot-sysid/live_env.sh`)
   now uses `SUBNET`, and its `live_driver.sh` refuses to start without `192.170.10.1`.
-- Switch-over to the tracked scripts (Rotem agreed, 8 November 2026; do it with no driver running, after the
-  scripts are committed and pushed): on this PC `cd ~/lbr_med_stack && git pull`, then
-  `ln -sfn ../scripts/robot-rt/launch_stationary.sh overlays/launch_stationary.sh` and the same for
-  `build_lbr.sh`. Until then this PC runs its untracked copy, which has no `--record`.
 - `--record` not yet run live: check that `run-1` appears under the root after a prepare/start/stop, that
   `fetch_recordings.sh` moves it, and that `run_check.py` reads it.
 - Workstation `~/.bashrc` now sets `ROS_DOMAIN_ID=85` and `ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET` (Rotem,
