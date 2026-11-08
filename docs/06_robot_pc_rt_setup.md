@@ -119,8 +119,8 @@ worst cases.
 
 ## First session from this PC (8 November 2026)
 
-`~/lbr_med_stack/overlays/launch_stationary.sh` (not in git) runs the 05 stationary launch with
-domain `85`, `SUBNET` discovery and recording disabled. It starts the launch unpinned, then moves the
+`launch_stationary.sh` runs the 05 stationary launch with domain `85`, `SUBNET` discovery and,
+without `--record`, recording disabled (see [Driver scripts](#driver-scripts-and-recordings)). It starts the launch unpinned, then moves the
 FRI thread (FIFO 80) to CPU 2 and the controller-manager loop (FIFO 50) to CPU 3 with `taskset -pc`
 while the driver awaits the heartbeat.
 
@@ -156,12 +156,45 @@ second until the next goal moved A6 away. Keep goals clear of the A6 limit.
   `~/ros2_kortex_ws` builds its own ros2_control, so it is no longer sourced by default; the
   `kinova` alias loads it. Never load it in a KUKA terminal.
 
+## Driver scripts and recordings
+
+The robot PC's scripts are tracked in [`scripts/robot-rt/`](../scripts/robot-rt/) (8 November 2026):
+`launch_stationary.sh` and `build_lbr.sh`. On this PC they will run from `~/lbr_med_stack/overlays/` as
+symlinks to the tracked files once the switch-over in Open items is done; the untracked copy there has no
+`--record`. Start the driver from the workstation:
+
+```bash
+ssh -t robot-rt '~/lbr_med_stack/overlays/launch_stationary.sh'                 # no recording
+ssh -t robot-rt '~/lbr_med_stack/overlays/launch_stationary.sh --record tau40'  # recording services on
+```
+
+`--record LABEL` sets `LBR_RECORDING_ROOT=~/lbr_recordings/<date>-LABEL-<HHMMSS>` on this PC; each run the
+recording services start lands in `<root>/run-<id>` and the process log in `<root>.driver.log`. The launch is
+otherwise identical (JTC, 1000 Hz controllers, default system config with tau 0.04, the same thread pinning).
+The workstation moves recordings into `03_projects/tactile-cable-sysid/runs/robot-sysid/` with
+`03_projects/tactile-cable-sysid/operations/robot-sysid/fetch_recordings.sh` (rsync; Rotem, 8 November 2026:
+the robot PC's copy is deleted after the transfer, except while a driver runs there, when it only copies). The
+folder names match the workstation's earlier `<date>-tau40-<HHMMSS>` sessions, so the run sheets' analysis
+commands find them. The recorder's message schema (`acquisition_v1.desc`) is byte-identical in this PC's and
+the workstation's `live-signals` builds, so the workstation's `LBR_GENERATED_PYTHON` decodes these recordings.
+The recorder creates the root when the driver starts, so a `--record` session with no recording leaves an
+empty `<root>/`; delete it before analysis commands that pick the latest session.
+
 ## Open items
 
-- 02 and 05 still describe the workstation as the FRI host and `LOCALHOST` discovery.
-- The workstation's `~/.bashrc` still sets `ROS_DOMAIN_ID=42`; sessions with this PC need `85` and
-  `SUBNET`.
-- `launch_stationary.sh` lives only in the git-ignored `overlays/` on this PC.
+
+- 02 and 05 carry a note pointing here (8 November 2026); their bodies still describe the workstation as the FRI
+  host and `LOCALHOST` discovery. The workstation live environment (`tactile-cable-sysid/operations/robot-sysid/live_env.sh`)
+  now uses `SUBNET`, and its `live_driver.sh` refuses to start without `192.170.10.1`.
+- Switch-over to the tracked scripts (Rotem agreed, 8 November 2026; do it with no driver running, after the
+  scripts are committed and pushed): on this PC `cd ~/lbr_med_stack && git pull`, then
+  `ln -sfn ../scripts/robot-rt/launch_stationary.sh overlays/launch_stationary.sh` and the same for
+  `build_lbr.sh`. Until then this PC runs its untracked copy, which has no `--record`.
+- `--record` not yet run live: check that `run-1` appears under the root after a prepare/start/stop, that
+  `fetch_recordings.sh` moves it, and that `run_check.py` reads it.
+- Workstation `~/.bashrc` now sets `ROS_DOMAIN_ID=85` and `ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET` (Rotem,
+  8 November 2026; original in `~/.bashrc.bak-2026-11-08`). New terminals there join the live robot's domain:
+  mock bringups must source `viz/mock_env.sh` (domain 86).
 - Kinova (not in use): pin its controller to CPUs 2-5 before a 1 kHz run.
 - A temporary passwordless sudo rule, `/etc/sudoers.d/90-setup-temp`, exists for the setup;
   remove it when setup is finished.

@@ -7,6 +7,11 @@ an earlier KLI setup. Robot power-on, pendant operation and live connection requ
 Rotem as operator. This procedure holds the current joint positions; motion is a
 separate experiment after recording inspection.
 
+> **Host moved, 8 November 2026:** the FRI client now runs on the robot PC `robot-rt`, which holds
+> `192.170.10.1` on `enp4s0`; start it over SSH with `~/lbr_med_stack/overlays/launch_stationary.sh` and use
+> discovery `SUBNET` (not `LOCALHOST`) on both machines. See [06](06_robot_pc_rt_setup.md). The workstation
+> (`enp130s0`, now `192.170.10.4`) runs MoveIt and RViz only. The table below records the 19 October session.
+
 ## Settings from the successful run
 
 | Setting | Value |

@@ -2,6 +2,8 @@
 
 > Current installed-robot startup: use [KONI, 192.170.10.1/24 and 1 ms](05_stationary_fri_startup.md),
 > verified on 19 October 2026. The KLI configuration below is retained for installation/history.
+> Since 8 November 2026 the FRI host is the robot PC `robot-rt` (`enp4s0`, `192.170.10.1/24`); the workstation
+> uses `192.170.10.4/24`. See [06](06_robot_pc_rt_setup.md).
 
 Cable the host to the cabinet (directly or through the lab switch) and give the host a static address on the
 FRI subnet. Do this before any real-robot bringup. None of this is needed for mock bringup.
